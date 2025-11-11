@@ -288,6 +288,80 @@ describe('Anthropic API Client', () => {
     await expect(callAnthropicAPI('Test', skills)).rejects.toThrow();
   });
 
+  it('should use custom model when CLAUDE_SKILLS_MODEL env var is set', async () => {
+    // Set custom model via environment variable
+    process.env.CLAUDE_SKILLS_MODEL = 'claude-sonnet-4-5';
+
+    const mockResponse = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            primary_intent: 'Custom model test',
+            skills: [{ name: 'test-skill', confidence: 0.85, reason: 'Testing custom model' }],
+          }),
+        },
+      ],
+    };
+
+    mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+
+    const skills: Record<string, SkillRule> = {
+      'test-skill': { type: 'domain' },
+    };
+
+    // Re-import to get fresh module with updated env
+    vi.resetModules();
+    const { callAnthropicAPI } = await import('../anthropic-client.js');
+
+    const result = await callAnthropicAPI('Test custom model', skills);
+
+    // Verify the API was called with the custom model
+    expect(mockAnthropicClient.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'claude-sonnet-4-5',
+      })
+    );
+
+    // Verify response was parsed correctly
+    expect(result.primary_intent).toBe('Custom model test');
+    expect(result.skills[0].name).toBe('test-skill');
+  });
+
+  it('should default to claude-haiku-4-5 when CLAUDE_SKILLS_MODEL is not set', async () => {
+    // Ensure CLAUDE_SKILLS_MODEL is not set
+    delete process.env.CLAUDE_SKILLS_MODEL;
+
+    const mockResponse = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            primary_intent: 'Default model test',
+            skills: [],
+          }),
+        },
+      ],
+    };
+
+    mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+
+    const skills: Record<string, SkillRule> = {};
+
+    // Re-import to get fresh module with updated env
+    vi.resetModules();
+    const { callAnthropicAPI } = await import('../anthropic-client.js');
+
+    await callAnthropicAPI('Test default model', skills);
+
+    // Verify the API was called with the default model
+    expect(mockAnthropicClient.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'claude-haiku-4-5',
+      })
+    );
+  });
+
   it('should handle empty JSON response', async () => {
     const mockResponse = {
       content: [

@@ -25,7 +25,8 @@ const INTENT_PROMPT_TEMPLATE = readFileSync(
 /**
  * Call Anthropic API for AI-powered intent analysis
  *
- * Uses Claude Haiku 4.5 to analyze user prompts and determine skill relevance.
+ * Uses Claude to analyze user prompts and determine skill relevance.
+ * Model is configurable via CLAUDE_SKILLS_MODEL env var (defaults to claude-haiku-4-5).
  * Applies template substitutions and parses JSON response.
  *
  * @param prompt - The user's input prompt to analyze
@@ -77,9 +78,10 @@ export async function callAnthropicAPI(
     skillDescriptions
   );
 
-  // Call Claude API
+  // Call Claude API (model configurable via CLAUDE_SKILLS_MODEL env var)
+  const model = process.env.CLAUDE_SKILLS_MODEL || 'claude-haiku-4-5';
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5',
+    model,
     max_tokens: 500,
     temperature: 0.1,
     messages: [

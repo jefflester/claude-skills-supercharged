@@ -19,7 +19,7 @@ Hooks are scripts that execute at specific points in Claude Code's workflow:
 **How it works:**
 
 1. Reads your prompt and conversation history
-1. Uses Claude Haiku 4.5 to analyze PRIMARY task intent
+1. Uses Claude (configurable model, defaults to Haiku 4.5) to analyze PRIMARY task intent
 1. Assigns confidence scores (0.0-1.0) to each skill
 1. Automatically injects high-confidence skills (>0.65) into context
 1. Suggests medium-confidence skills (0.50-0.65) as optional
@@ -44,7 +44,7 @@ User: "I need to add a new REST API endpoint"
 
 **Key Features:**
 
-- **AI-Powered Intent Analysis**: Claude Haiku 4.5 analyzes prompts for accurate skill detection
+- **AI-Powered Intent Analysis**: Claude analyzes prompts for accurate skill detection (model configurable via env var)
 - **Smart Caching**: 1-hour TTL reduces API costs and improves response time
 - **Bidirectional Affinity**: Related skills automatically loaded together
 - **Session Tracking**: Skills only injected once per conversation
@@ -72,7 +72,8 @@ User: "I need to add a new REST API endpoint"
 **Performance:**
 
 - AI analysis: ~200ms (first call), <10ms (cached)
-- Cost: ~$1-2/month at 100 prompts/day (using Claude Haiku)
+- Cost: ~$1-2/month at 100 prompts/day (using default Claude Haiku model)
+- Model: Configurable via CLAUDE_SKILLS_MODEL env var (defaults to claude-haiku-4-5)
 - Cache TTL: 1 hour
 - Cache location: `.cache/intent-analysis/`
 
@@ -106,7 +107,7 @@ User Prompt
     ↓
 ┌─────────────────────────────────────┐
 │ 1. Intent Analysis                  │
-│    - AI analysis (Claude Haiku)     │
+│    - AI analysis (Claude)           │
 │    - Keyword fallback               │
 │    - Cache hit/miss                 │
 └─────────────────────────────────────┘

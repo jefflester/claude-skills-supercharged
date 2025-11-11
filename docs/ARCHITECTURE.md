@@ -1,6 +1,7 @@
 # Architecture Documentation
 
-This document explains the internal architecture of the Claude Skills Supercharged system.
+This document explains the internal architecture of the Claude Skills
+Supercharged system.
 
 ## System Overview
 
@@ -92,9 +93,11 @@ if (score > 0.65) {
 
 Applies filtration rules:
 
-1. **Filter acknowledged skills** - Skip skills already loaded in this conversation
+1. **Filter acknowledged skills** - Skip skills already loaded in this
+   conversation
 2. **Apply injection limit** - Max 2 skills per prompt (configurable)
-3. **Promote suggested skills** - If slots available, promote from "suggested" to "required"
+3. **Promote suggested skills** - If slots available, promote from "suggested"
+   to "required"
 
 **Example:**
 ```
@@ -107,7 +110,7 @@ Output: Top 2 highest confidence skills
 
 **File:** `lib/skill-filtration.ts` (continued)
 
-Loads related skills automatically:
+Loads related skills automatically at **no slot cost** (bonus injections):
 
 ```json
 {
@@ -118,26 +121,39 @@ Loads related skills automatically:
 ```
 
 **Rules:**
-- Bidirectional: If A → B, then B → A
-- Free of slot cost: Doesn't count against injection limit
-- Max 2 affinities per skill
+- **Bidirectional:** If A → B, then B → A (works both ways automatically)
+- **Free of slot cost:** Affinity skills don't count against the 2-skill
+  injection limit
+- **Max 2 affinities per skill** (recommended)
 
 **Example:**
 ```
 User prompt triggers "api-security"
 api-security has affinity: ["python-best-practices"]
-Both skills loaded automatically
+Both skills loaded automatically (1 required + 1 affinity bonus = 2 total, uses 1 slot)
 ```
+
+**Why this matters:** Affinity lets you load 3+ skills while only using 1-2
+injection slots, maximizing context without hitting the limit.
+
+> 💡 **Decision guide:** See
+> [CREATING-SKILLS.md](CREATING-SKILLS.md#understanding-requiredskills-vs-affinity)
+> for when to use affinity vs requiredSkills
 
 ### Stage 5: Dependency Resolution
 
 **File:** `lib/skill-resolution.ts`
 
-Resolves `requiredSkills` dependencies:
+Resolves `requiredSkills` dependencies (hard dependencies):
 
 1. **Depth-first search** - Traverse dependency tree
 2. **Cycle detection** - Prevent infinite loops
-3. **Sort by injectionOrder** - Deterministic ordering
+3. **Sort by injectionOrder** - Deterministic ordering (0-100)
+
+**Key difference from affinity:**
+- **Unidirectional:** If A requires B, only A→B exists (not bidirectional)
+- **Guaranteed ordering:** Dependencies always load before dependent skills
+- **Counts toward slot limit:** Each required skill uses an injection slot
 
 **Example:**
 ```json
@@ -149,6 +165,10 @@ Resolves `requiredSkills` dependencies:
 ```
 
 Resolution order: `skill-c` → `skill-b` → `skill-a`
+
+> 💡 **Decision guide:** See
+> [CREATING-SKILLS.md](CREATING-SKILLS.md#understanding-requiredskills-vs-affinity)
+> for when to use requiredSkills vs affinity
 
 ### Stage 6: Skill Injection
 
@@ -180,7 +200,8 @@ Loads and formats skill content:
 
 Tracks loaded skills per conversation:
 
-1. **Read state file** - `.claude/hooks/state/{conversation-id}-skills-suggested.json`
+1. **Read state file** -
+   `.claude/hooks/state/{conversation-id}-skills-suggested.json`
 2. **Add new skills** - Append newly loaded skills
 3. **Write atomically** - Temp file + rename for safety
 
@@ -309,7 +330,8 @@ The system supports two skill types:
 - Respect injection limits
 - Session-aware (inject once per conversation)
 
-**Examples:** `python-best-practices`, `api-security`, `git-workflow`, `skill-developer`
+**Examples:** `python-best-practices`, `api-security`, `git-workflow`,
+`skill-developer`
 
 **Use case:** Domain-specific guidance and system maintenance
 
@@ -429,14 +451,18 @@ function calculateCustomScore(analysis: IntentAnalysis): number {
 
 ### Alternative AI Models
 
-Swap in `lib/anthropic-client.ts`:
+Configure via `CLAUDE_SKILLS_MODEL` environment variable:
 
-```typescript
-const response = await client.messages.create({
-  model: "claude-opus-4-20250514", // Different model
-  // ... rest of config
-});
+```bash
+# In .claude/hooks/.env
+CLAUDE_SKILLS_MODEL=claude-sonnet-4-5  # Use Sonnet
+CLAUDE_SKILLS_MODEL=claude-opus-4      # Use Opus
 ```
+
+Available models:
+- `claude-haiku-4-5` (default: fast, cheap, accurate)
+- `claude-sonnet-4-5` (more capable, higher cost)
+- `claude-opus-4` (highest cost, *not* recommended for this use case)
 
 ## Testing Architecture
 
@@ -481,4 +507,5 @@ Potential improvements:
 
 - [GETTING-STARTED.md](GETTING-STARTED.md) - Setup and basic usage
 - [CREATING-SKILLS.md](CREATING-SKILLS.md) - Authoring custom skills
-- [skill-developer/SKILL.md](../.claude/skills/skill-developer/SKILL.md) - Skill system reference
+- [skill-developer/SKILL.md](../.claude/skills/skill-developer/SKILL.md) - Skill
+  system reference

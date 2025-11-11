@@ -1,6 +1,6 @@
 # Claude Skills Supercharged
 
-[![Tests](https://img.shields.io/badge/tests-118%20passing-brightgreen)](https://github.com/jefflester/claude-skills-supercharged)
+[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/jefflester/claude-skills-supercharged)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude
@@ -24,7 +24,7 @@ context—every time.
 
 | Metric | Value |
 |--------|-------|
-| ✅ Test Coverage | **118/118 tests passing** |
+| ✅ Test Coverage | **120/120 tests passing** |
 | ⚡ Response Time | **<10ms** (cached) / ~200ms (first call) |
 | 💰 Monthly Cost | **$1-2** @ 100 prompts/day |
 | 🎯 Accuracy | **95%+** skill detection rate |
@@ -84,7 +84,7 @@ automatically. 🎉
   content in resources
 - 🛡️ **Guardrail Skills** — Enforce critical best practices (e.g., API
   security, input validation)
-- ✅ **Comprehensive Testing** — 118 tests with full coverage of the injection
+- ✅ **Comprehensive Testing** — 120 tests with full coverage of the injection
   pipeline
 
 ## 🚀 Quick Start
@@ -368,6 +368,22 @@ to be triggered at the right time.
 
 ## ⚙️ Configuration
 
+### Change AI Model
+
+Set the model used for intent analysis via environment variable (defaults to
+`claude-haiku-4-5`):
+
+```bash
+# In .claude/hooks/.env
+CLAUDE_SKILLS_MODEL=claude-sonnet-4-5  # Use Sonnet for more accurate analysis
+```
+
+Available models:
+
+- `claude-haiku-4-5` (recommended: fast, cheap, accurate)
+- `claude-sonnet-4-5` (more capable, higher cost)
+- `claude-opus-4` (most capable, highest cost)
+
 ### Adjust Confidence Thresholds
 
 Edit `.claude/hooks/lib/constants.ts`:
@@ -503,6 +519,20 @@ detailed content.
 
 **Q: Can skills depend on other skills?** A: Yes! Use the `requiredSkills` array
 in `skill-rules.json` to specify dependencies.
+
+**Q: What's the difference between requiredSkills and affinity?**
+
+| Aspect | requiredSkills | affinity |
+|--------|---------------|----------|
+| **Purpose** | Hard dependencies | Complementary skills |
+| **Direction** | One-way only | Bidirectional (both ways) |
+| **Slot cost** | Counts toward 2-skill limit | **FREE** - bonus injections |
+| **Use when** | "Skill A needs B to work" | "Skills work great together" |
+
+- Use **`requiredSkills`** for mandatory dependencies (e.g., advanced skill
+  requires foundation)
+- Use **`affinity`** for related skills that complement each other (loads 3+
+  skills while using 1-2 slots)
 
 **Q: How do I see which skills are loaded?** A: Look for the "📚 AUTO-LOADED
 SKILLS" banner at the start of Claude's response.

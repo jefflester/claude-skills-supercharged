@@ -1,6 +1,7 @@
 # Creating Custom Skills
 
-This guide shows you how to create effective custom skills for your project using the Claude Skills Supercharged system.
+This guide shows you how to create effective custom skills for your project
+using the Claude Skills Supercharged system.
 
 ## Skill Anatomy
 
@@ -324,38 +325,118 @@ Follow this template:
 
 ## Advanced Features
 
-### Skill Dependencies
+### Understanding requiredSkills vs affinity
 
-Require other skills to be loaded first:
+Two powerful mechanisms for loading related skills:
+
+| Aspect | requiredSkills | affinity |
+|--------|---------------|----------|
+| **Purpose** | Hard dependencies | Complementary skills |
+| **Direction** | Unidirectional (A→B only) | Bidirectional (A↔B both ways) |
+| **Slot cost** | Counts toward 2-skill limit | **FREE** - bonus injections |
+| **Ordering** | Dependencies load first | No guaranteed order |
+| **Use case** | "A requires B to function" | "A and B work great together" |
+| **Max** | Unlimited | 2 per skill (recommended) |
+
+### When to Use Each
+
+**Use `requiredSkills` when:**
+- One skill absolutely depends on another's context
+- You need guaranteed loading order (foundation → advanced)
+- A skill won't make sense without its prerequisite
+
+**Use `affinity` when:**
+- Skills complement each other but aren't strict dependencies
+- You want to maximize context without burning injection slots
+- Related skills should load together for better results
+
+### Real-World Example
+
+**Scenario:** User asks "Help me build a REST API with authentication"
+
+**Configuration:**
+```json
+{
+  "api-development": {
+    "type": "domain",
+    "affinity": ["api-security"]
+  },
+  "api-security": {
+    "type": "guardrail",
+    "requiredSkills": ["security-basics"]
+  },
+  "security-basics": {
+    "type": "domain"
+  }
+}
+```
+
+**What happens:**
+1. AI detects `api-development` as critical (confidence > 0.65)
+2. System injects `api-development` **(uses 1 slot)**
+3. Affinity triggers: `api-security` auto-loads **(FREE - no slot cost)**
+4. Dependency resolves: `security-basics` loads first **(FREE - part of
+   dependency chain)**
+
+**Result:** **3 skills loaded using only 1 injection slot** 🎉
+
+### Skill Dependencies (requiredSkills)
+
+Use `requiredSkills` for hard dependencies:
 
 ```json
 {
-  "my-advanced-skill": {
-    "requiredSkills": ["my-basic-skill"],
+  "advanced-api-patterns": {
+    "requiredSkills": ["api-development", "design-patterns"],
+    "type": "domain",
     ...
   }
 }
 ```
 
-When `my-advanced-skill` activates, `my-basic-skill` loads automatically.
+**Behavior:**
+- Dependencies load **before** the dependent skill
+- Uses depth-first search for transitive dependencies
+- Detects circular dependencies and reports them
+- Example: `advanced-api-patterns` requires `api-development`, which requires
+  `http-basics` → Load order: `http-basics` → `api-development` →
+  `advanced-api-patterns`
 
 ### Skill Affinity
 
-Load complementary skills together:
+Use `affinity` for complementary skills that work well together:
 
 ```json
 {
-  "api-development": {
-    "affinity": ["api-security", "database-patterns"],
+  "frontend-framework": {
+    "affinity": ["system-architecture", "api-protocols"],
+    "type": "domain",
     ...
   }
 }
 ```
 
 **Rules:**
-- Bidirectional: If A → B, then B → A
-- Max 2 affinities per skill
-- Free of slot cost
+- **Bidirectional:** If A lists B in affinity, then loading A auto-loads B,
+  **AND** loading B auto-loads A
+- **Free of slot cost:** Affinity skills don't count toward the 2-skill
+  injection limit
+- **Max 2 per skill:** Keep affinity lists short for focused context
+
+**Bidirectional Example:**
+```json
+{
+  "frontend-framework": {
+    "affinity": ["system-architecture"]
+  },
+  "api-protocols": {
+    "affinity": ["system-architecture"]
+  }
+}
+```
+
+Loading `system-architecture` will automatically load both `frontend-framework`
+AND `api-protocols` because they list it in their affinity (reverse affinity).
 
 ## Testing Your Skill
 
