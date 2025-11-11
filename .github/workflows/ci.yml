@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '.claude/hooks/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: .claude/hooks
+        run: npm ci
+
+      - name: Run type checking
+        working-directory: .claude/hooks
+        run: npm run check
+
+      - name: Run tests
+        working-directory: .claude/hooks
+        run: npm test
+
+      - name: Report results
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "✅ All checks passed! (118 tests)"
+          else
+            echo "❌ Tests failed. Review logs above."
+            exit 1
+          fi

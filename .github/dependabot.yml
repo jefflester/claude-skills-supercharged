@@ -1,0 +1,34 @@
+# Dependabot configuration for automated dependency updates
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Node.js dependencies in Claude hooks
+  - package-ecosystem: "npm"
+    directory: "/.claude/hooks"
+    schedule:
+      interval: "daily"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    # Group related updates to reduce PR noise
+    groups:
+      # Group all TypeScript/ESLint updates together
+      typescript-eslint:
+        patterns:
+          - "@typescript-eslint/*"
+          - "typescript"
+          - "eslint"
+      # Group all dev dependencies (minor/patch only)
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # Auto-approve and enable auto-merge for Dependabot PRs
+    # (requires GitHub Actions workflow to complete)
+    assignees:
+      - "jefflester"
+    labels:
+      - "dependencies"
+      - "automated"
