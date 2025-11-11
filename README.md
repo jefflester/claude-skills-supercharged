@@ -500,29 +500,49 @@ architecture.
 
 ## ❓ FAQ
 
-**Q: Does this work with other AI assistants?** A: The skills system is specific
-to Claude Code's hook system. However, the concept can be adapted to other
-tools.
+**Q: Does this work with other AI assistants?**
 
-**Q: How much does the API usage cost?** A: Approximately $1-2/month at 100
-prompts/day using Claude Haiku 4.5. Caching significantly reduces costs.
+**A**: The skills system is specific to Claude Code's hook system. However, the
+concept can be adapted to other tools.
 
-**Q: Can I use this without the AI analysis?** A: Yes! Set `ANTHROPIC_API_KEY`
-to empty and the system will fall back to keyword matching.
+-----
 
-**Q: How do I disable a skill?** A: Set `autoInject: false` in
-`skill-rules.json` or remove the skill entirely.
+**Q: How much does the API usage cost?**
 
-**Q: What's the 500-line rule?** A: Skills should stay under 500 lines for
-optimal agent processing. Use progressive disclosure (resource files) for
-detailed content.
+**A**: Approximately $1-2/month at 100 prompts/day using Claude Haiku 4.5.
+Caching significantly reduces costs.
 
-**Q: Can skills depend on other skills?** A: Yes! Use the `requiredSkills` array
-in `skill-rules.json` to specify dependencies.
+-----
 
-**Q: What's the difference between requiredSkills and affinity?**
+**Q: Can I use this without the AI analysis?**
 
-| Aspect | requiredSkills | affinity |
+**A**: Yes! Set `ANTHROPIC_API_KEY` to empty and the system will fall back to
+keyword matching.
+
+-----
+
+**Q: How do I disable a skill?**
+
+**A**: Set `autoInject: false` in `skill-rules.json` or remove the skill
+entirely.
+
+-----
+
+**Q: What's the 500-line rule?**
+
+**A**: Skills should stay under 500 lines for optimal agent processing. Use
+progressive disclosure (resource files) for detailed content.
+
+-----
+
+**Q: Can skills depend on other skills?**
+
+**A**: Yes! Use the `requiredSkills` array in `skill-rules.json` to specify
+dependencies.
+
+**Q: What's the difference between `requiredSkills` and `affinity`?**
+
+| Aspect | `requiredSkills` | `affinity` |
 |--------|---------------|----------|
 | **Purpose** | Hard dependencies | Complementary skills |
 | **Direction** | One-way only | Bidirectional (both ways) |
@@ -534,5 +554,9 @@ in `skill-rules.json` to specify dependencies.
 - Use **`affinity`** for related skills that complement each other (loads 3+
   skills while using 1-2 slots)
 
-**Q: How do I see which skills are loaded?** A: Look for the "📚 AUTO-LOADED
-SKILLS" banner at the start of Claude's response.
+-----
+
+**Q: How do I see which skills are loaded?**
+
+**A**: Look for the "📚 AUTO-LOADED SKILLS" banner at the start of Claude's
+response.
