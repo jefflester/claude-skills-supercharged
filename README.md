@@ -262,19 +262,19 @@ API security and vulnerability prevention. Enforces security checks.
 The system is built on three main components:
 
 1. **Hook System** (`.claude/hooks/`)
-   - UserPromptSubmit hook that analyzes prompts
+   - `UserPromptSubmit` hook that analyzes prompts
    - 13 TypeScript modules handling the injection pipeline
    - Comprehensive test suite (11 test files)
 
 2. **Skills** (`.claude/skills/`)
-   - SKILL.md files with YAML frontmatter
+   - `SKILL.md` files with YAML frontmatter
    - Resource directories for detailed content
-   - skill-rules.json configuration
+   - `skill-rules.json` configuration
 
 3. **Configuration**
-   - skill-rules.json: Defines all skills and triggers
-   - intent-analysis-prompt.txt: AI analysis template
-   - .env: API key configuration
+   - `skill-rules.json`: Defines all skills and triggers
+   - `intent-analysis-prompt.txt`: AI analysis template
+   - `.env`: API key configuration
 
 For detailed architecture documentation, see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -308,7 +308,7 @@ When it should activate...
 [Your content here - keep under 500 lines]
 ```
 
-### 3. Add to skill-rules.json
+### 3. Add to `skill-rules.json`
 
 ```json
 {
@@ -494,15 +494,15 @@ prompts/day using Claude Haiku 4.5. Caching significantly reduces costs.
 **Q: Can I use this without the AI analysis?** A: Yes! Set `ANTHROPIC_API_KEY`
 to empty and the system will fall back to keyword matching.
 
-**Q: How do I disable a skill?** A: Set `autoInject: false` in skill-rules.json
-or remove the skill entirely.
+**Q: How do I disable a skill?** A: Set `autoInject: false` in
+`skill-rules.json` or remove the skill entirely.
 
 **Q: What's the 500-line rule?** A: Skills should stay under 500 lines for
 optimal agent processing. Use progressive disclosure (resource files) for
 detailed content.
 
 **Q: Can skills depend on other skills?** A: Yes! Use the `requiredSkills` array
-in skill-rules.json to specify dependencies.
+in `skill-rules.json` to specify dependencies.
 
 **Q: How do I see which skills are loaded?** A: Look for the "📚 AUTO-LOADED
 SKILLS" banner at the start of Claude's response.
