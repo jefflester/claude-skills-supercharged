@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Claude Code Skill Rules Configuration",
+  "type": "object",
+  "required": ["version", "skills"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "Schema version (e.g., '1.0')"
+    },
+    "skills": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "required": ["type", "autoInject"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["guardrail", "domain"],
+              "description": "Skill type: guardrail (blocking) or domain (guidance)"
+            },
+            "enforcement": {
+              "type": "string",
+              "enum": ["block", "suggest", "warn"],
+              "description": "Enforcement level"
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["critical", "high", "medium", "low"],
+              "description": "Priority for skill ordering"
+            },
+            "autoInject": {
+              "type": "boolean",
+              "description": "Auto-inject skill content when triggered"
+            },
+            "requiredSkills": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Dependencies (other skills required)"
+            },
+            "injectionOrder": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Order for dependency injection (0-100)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable skill description"
+            },
+            "promptTriggers": {
+              "type": "object",
+              "properties": {
+                "keywords": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Keywords to match in prompts"
+                }
+              }
+            },
+            "affinity": {
+              "type": "array",
+              "items": { "type": "string" },
+              "maxItems": 2,
+              "description": "Bidirectional complementary skills (max 2)"
+            }
+          }
+        }
+      }
+    }
+  }
+}

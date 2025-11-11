@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "skills": {
+    "skill-developer": {
+      "type": "domain",
+      "autoInject": true,
+      "requiredSkills": [],
+      "description": "Skill for creating and managing Claude Code skills. Covers skill structure, YAML frontmatter, trigger patterns, hook mechanisms (UserPromptSubmit), session tracking, 500-line rule, progressive disclosure, and relationship to CLAUDE.md. Use when creating new skills, modifying skill-rules.json, understanding triggers, debugging activation, or understanding the skills system architecture.",
+      "promptTriggers": {
+        "keywords": [
+          "Claude Code skill",
+          "skill system",
+          "create skill",
+          "add skill",
+          "skill triggers",
+          "skill rules",
+          "skill hook",
+          "skill activation",
+          "skill development",
+          "skill-rules.json",
+          "intent-analysis-prompt",
+          "UserPromptSubmit hook",
+          "progressive disclosure",
+          "500-line rule"
+        ]
+      }
+    },
+    "python-best-practices": {
+      "type": "domain",
+      "autoInject": true,
+      "requiredSkills": [],
+      "description": "Python development best practices including PEP 8 style guidelines, type hints, docstring conventions (NumPy format), and common patterns. Use when writing or modifying Python code.",
+      "promptTriggers": {
+        "keywords": [
+          "python",
+          "python best practices",
+          "PEP 8",
+          "type hints",
+          "docstring",
+          "python style",
+          "python patterns"
+        ]
+      }
+    },
+    "git-workflow": {
+      "type": "domain",
+      "autoInject": true,
+      "requiredSkills": [],
+      "description": "Git workflow best practices including commit messages (Conventional Commits), branching strategies, pull requests, and collaboration patterns. Use when working with Git version control.",
+      "promptTriggers": {
+        "keywords": [
+          "git",
+          "commit",
+          "commit message",
+          "branch",
+          "merge",
+          "pull request",
+          "PR",
+          "rebase",
+          "git flow"
+        ]
+      }
+    },
+    "api-security": {
+      "type": "guardrail",
+      "autoInject": true,
+      "requiredSkills": [],
+      "description": "API security best practices and common vulnerability prevention. Enforces security checks for authentication, input validation, SQL injection, XSS, and OWASP Top 10 vulnerabilities. Use when building or modifying APIs.",
+      "promptTriggers": {
+        "keywords": [
+          "api",
+          "endpoint",
+          "route",
+          "authentication",
+          "authorization",
+          "security",
+          "SQL injection",
+          "XSS",
+          "CORS",
+          "API security"
+        ]
+      }
+    }
+  }
+}

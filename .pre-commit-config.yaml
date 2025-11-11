@@ -1,0 +1,79 @@
+# Pre-commit hooks for Claude Skills Supercharged
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # Allow custom tags in YAML
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+
+  # TypeScript/JavaScript linting (uses project's eslint config)
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.8.0
+    hooks:
+      - id: eslint
+        files: \.tsx?$
+        types: [file]
+        additional_dependencies:
+          - eslint@^8.0.0
+          - typescript@^5.0.0
+          - '@typescript-eslint/parser@^6.0.0'
+          - '@typescript-eslint/eslint-plugin@^6.0.0'
+        args: [--config, .claude/hooks/.eslintrc.json]
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.37.0
+    hooks:
+      - id: markdownlint
+        args: [--disable, MD013, MD033, MD041]  # Disable line-length, HTML, first-line-heading
+
+  # TypeScript type checking and tests
+  - repo: local
+    hooks:
+      - id: tsc
+        name: TypeScript type check
+        entry: bash -c 'cd .claude/hooks && npx tsc --noEmit'
+        language: system
+        files: \.tsx?$
+        pass_filenames: false
+
+      - id: typescript-tests
+        name: Run TypeScript unit tests
+        entry: bash -c 'cd .claude/hooks && npm test'
+        language: system
+        files: '^\.claude/hooks/.*\.ts$'
+        pass_filenames: false
+        description: Run TypeScript unit tests (fast ~130ms)
+
+  # Skill file length check (500-line rule)
+  - repo: local
+    hooks:
+      - id: check-skill-length
+        name: Check skill files under 500 lines
+        entry: bash -c 'for f in .claude/skills/*/SKILL.md; do lines=$(wc -l < "$f"); if [ $lines -gt 500 ]; then echo "ERROR - $f has $lines lines (max 500)"; exit 1; fi; done'
+        language: system
+        files: \.claude/skills/.*/SKILL\.md$
+        pass_filenames: false
+
+  # Validate skill-rules.json
+  - repo: local
+    hooks:
+      - id: validate-skill-rules
+        name: Validate skill-rules.json schema
+        entry: bash -c 'cd .claude/hooks && npx tsx -e "import {validateSkillRules} from \"./lib/schema-validator\"; import fs from \"fs\"; const rules = JSON.parse(fs.readFileSync(\"../skills/skill-rules.json\", \"utf-8\")); validateSkillRules(rules);"'
+        language: system
+        files: \.claude/skills/skill-rules\.json$
+        pass_filenames: false
