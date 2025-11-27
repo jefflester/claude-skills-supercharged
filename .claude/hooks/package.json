@@ -25,7 +25,7 @@
         "@typescript-eslint/eslint-plugin": "^8.48.0",
         "@typescript-eslint/parser": "^8.46.4",
         "eslint": "^9.39.1",
-        "prettier": "^3.2.4",
+        "prettier": "^3.7.1",
         "vitest": "^4.0.14"
     }
 }
