@@ -1,5 +1,8 @@
 # Claude Skills Supercharged
 
+[![Run in Smithery](https://smithery.ai/badge/skills/jefflester)](https://smithery.ai/skills?ns=jefflester&utm_source=github&utm_medium=badge)
+
+
 [![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/jefflester/claude-skills-supercharged)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
