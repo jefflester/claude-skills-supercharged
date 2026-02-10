@@ -38,6 +38,8 @@ export function matchSkillsByKeywords(
   const detected: string[] = [];
 
   for (const [name, config] of Object.entries(skills)) {
+    // Keyword fallback only returns guardrail skills; domain skills require AI analysis
+    if (config.autoInject === false) continue;
     const keywords = config.promptTriggers?.keywords || [];
     if (keywords.some((kw: string) => promptLower.includes(kw.toLowerCase()))) {
       detected.push(name);

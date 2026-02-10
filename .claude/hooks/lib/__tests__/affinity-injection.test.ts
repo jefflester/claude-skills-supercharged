@@ -195,7 +195,7 @@ describe('Affinity Injection System', () => {
       expect(affinities).toEqual([]);
     });
 
-    it('should not inject affinity skill with autoInject: false', () => {
+    it('should inject affinity skill even with autoInject: false (affinity overrides)', () => {
       const skillRules: Record<string, SkillRule> = {
         'parent-skill': {
           type: 'domain',
@@ -203,14 +203,15 @@ describe('Affinity Injection System', () => {
         },
         'manual-skill': {
           type: 'domain',
-          autoInject: false, // Manual load required
+          autoInject: false,
         },
       };
 
       const affinities = findAffinityInjections(['parent-skill'], [], skillRules);
 
-      // Should not inject manual-skill (autoInject: false)
-      expect(affinities).toEqual([]);
+      // autoInject: false no longer blocks affinity injection —
+      // it only gates keyword fallback, not AI-scored or affinity paths
+      expect(affinities).toEqual(['manual-skill']);
     });
 
     it('should handle multiple skills being injected with overlapping affinities', () => {

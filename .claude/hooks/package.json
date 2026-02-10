@@ -12,8 +12,7 @@
         "format:check": "prettier --check '**/*.ts'",
         "test": "vitest run",
         "test:watch": "vitest watch",
-        "test:coverage": "vitest run --coverage",
-        "test:integration": "tsx skill-activation-prompt.ts < test-input.json"
+        "test:coverage": "vitest run --coverage"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.74.0",

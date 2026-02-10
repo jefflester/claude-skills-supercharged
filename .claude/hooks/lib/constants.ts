@@ -42,6 +42,10 @@ export const CACHE_CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 // Skills without explicit injectionOrder use this value (mid-range 0-100)
 export const DEFAULT_INJECTION_ORDER = 50;
 
+// Debug mode toggle
+// Controlled by CLAUDE_SKILLS_DEBUG=1 environment variable
+export const DEBUG_ENABLED = process.env.CLAUDE_SKILLS_DEBUG === '1';
+
 // Banner formatting
 // Character width for visual consistency in terminal output
 export const BANNER_WIDTH = 45;

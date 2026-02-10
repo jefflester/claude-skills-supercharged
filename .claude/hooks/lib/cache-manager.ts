@@ -16,7 +16,7 @@ import {
   statSync,
 } from 'fs';
 import { join } from 'path';
-import { CACHE_TTL_MS, CACHE_CLEANUP_AGE_MS } from './constants.js';
+import { CACHE_TTL_MS, CACHE_CLEANUP_AGE_MS, DEBUG_ENABLED } from './constants.js';
 import type { CacheEntry } from './types.js';
 
 // Use project root for cache directory, not hooks cwd
@@ -104,14 +104,14 @@ function cleanupOldCacheEntries(): void {
         }
       } catch (err) {
         // Log in debug mode for troubleshooting
-        if (process.env.CLAUDE_SKILL_DEBUG === 'true') {
+        if (DEBUG_ENABLED) {
           console.warn(`Cache cleanup: failed to process ${file}:`, err);
         }
       }
     });
   } catch (err) {
     // Log directory-level errors in debug mode
-    if (process.env.CLAUDE_SKILL_DEBUG === 'true') {
+    if (DEBUG_ENABLED) {
       console.warn('Cache cleanup failed:', err);
     }
   }
