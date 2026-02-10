@@ -186,8 +186,11 @@ export function filterAndPromoteSkills(
   const unacknowledgedCritical = filterUnacknowledgedSkills(requiredSkills, acknowledged);
   const unacknowledgedRecommended = filterUnacknowledgedSkills(suggestedSkills, acknowledged);
 
-  // Calculate how many critical skills are already loaded
-  const acknowledgedCriticalCount = requiredSkills.filter((s) => acknowledged.includes(s)).length;
+  // Calculate how many critical domain skills are already loaded (guardrails
+  // are exempt from the cap, so they shouldn't reduce domain slots)
+  const acknowledgedCriticalCount = requiredSkills.filter(
+    (s) => acknowledged.includes(s) && skillRules[s]?.type !== 'guardrail'
+  ).length;
 
   // Apply promotion to reach 2-skill target (guardrails exempt from cap)
   return applyInjectionLimits(

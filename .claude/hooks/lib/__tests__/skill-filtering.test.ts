@@ -173,10 +173,10 @@ describe('Skill Filtering', () => {
   });
 
   describe('filterAndPromoteSkills (Integration)', () => {
-    it('should filter + promote when 1 critical already loaded', () => {
+    it('should not count acknowledged guardrails toward domain slot reduction', () => {
       const requiredSkills = ['python-best-practices', 'api-security'];
       const suggestedSkills = ['git-workflow', 'skill-developer'];
-      const acknowledged = ['api-security'];
+      const acknowledged = ['api-security']; // guardrail — doesn't reduce domain slots
       const skillRules: Record<string, SkillRule> = {
         'python-best-practices': { type: 'domain' },
         'api-security': { type: 'guardrail' },
@@ -191,17 +191,17 @@ describe('Skill Filtering', () => {
         skillRules
       );
 
-      // Target = 2 - 1 (acknowledged critical) = 1 domain slot
-      // python-best-practices fills 1 domain slot
-      expect(result.toInject).toEqual(['python-best-practices']);
-      expect(result.promoted).toEqual([]);
-      expect(result.remainingSuggested).toEqual(['git-workflow', 'skill-developer']);
+      // Target = 2 - 0 (guardrail doesn't count) = 2 domain slots
+      // python-best-practices (critical) + git-workflow (promoted)
+      expect(result.toInject).toEqual(['python-best-practices', 'git-workflow']);
+      expect(result.promoted).toEqual(['git-workflow']);
+      expect(result.remainingSuggested).toEqual(['skill-developer']);
     });
 
-    it('should promote when all critical skills already loaded', () => {
+    it('should reduce slots only for acknowledged domain skills', () => {
       const requiredSkills = ['python-best-practices', 'api-security'];
       const suggestedSkills = ['git-workflow', 'skill-developer'];
-      const acknowledged = ['python-best-practices', 'api-security'];
+      const acknowledged = ['python-best-practices', 'api-security']; // 1 domain + 1 guardrail
       const skillRules: Record<string, SkillRule> = {
         'python-best-practices': { type: 'domain' },
         'api-security': { type: 'guardrail' },
@@ -216,11 +216,11 @@ describe('Skill Filtering', () => {
         skillRules
       );
 
-      // Target = 2 - 2 (acknowledged) = 0 domain slots
-      // No skills to inject
-      expect(result.toInject).toEqual([]);
-      expect(result.promoted).toEqual([]);
-      expect(result.remainingSuggested).toEqual(['git-workflow', 'skill-developer']);
+      // Target = 2 - 1 (only domain python-best-practices counts) = 1 domain slot
+      // git-workflow promoted to fill the 1 slot
+      expect(result.toInject).toEqual(['git-workflow']);
+      expect(result.promoted).toEqual(['git-workflow']);
+      expect(result.remainingSuggested).toEqual(['skill-developer']);
     });
 
     it('should promote 2 suggested domain skills and always include guardrails', () => {
