@@ -11,4 +11,4 @@ if [ -f .env ]; then
     set +a
 fi
 
-cat | npx tsx skill-activation-prompt.ts
+cat | npx tsx skill-activation-prompt.ts || true

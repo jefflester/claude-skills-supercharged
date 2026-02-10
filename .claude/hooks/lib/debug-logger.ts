@@ -7,8 +7,9 @@
 
 import { appendFileSync, existsSync, statSync, renameSync } from 'fs';
 import { join } from 'path';
+import { DEBUG_ENABLED } from './constants.js';
 
-const DEBUG_SKILLS = process.env.CLAUDE_SKILLS_DEBUG === '1';
+const DEBUG_SKILLS = DEBUG_ENABLED;
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**

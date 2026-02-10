@@ -1,6 +1,6 @@
 # Claude Skills Supercharged
 
-[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/jefflester/claude-skills-supercharged)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/jefflester/claude-skills-supercharged)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude
@@ -24,7 +24,7 @@ context—every time.
 
 | Metric | Value |
 |--------|-------|
-| ✅ Test Coverage | **120/120 tests passing** |
+| ✅ Test Coverage | **All tests passing** |
 | ⚡ Response Time | **<10ms** (cached) / ~200ms (first call) |
 | 💰 Monthly Cost | **$1-2** @ 100 prompts/day |
 | 🎯 Accuracy | **95%+** skill detection rate |
@@ -84,7 +84,7 @@ automatically. 🎉
   content in resources
 - 🛡️ **Guardrail Skills** — Enforce critical best practices (e.g., API
   security, input validation)
-- ✅ **Comprehensive Testing** — 120 tests with full coverage of the injection
+- ✅ **Comprehensive Testing** — Full coverage of the injection
   pipeline
 
 ## 🚀 Quick Start
