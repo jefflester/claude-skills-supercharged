@@ -15,7 +15,7 @@
         "test:coverage": "vitest run --coverage"
     },
     "dependencies": {
-        "@anthropic-ai/sdk": "^0.86.1",
+        "@anthropic-ai/sdk": "^0.87.0",
         "@types/node": "^25.5.2",
         "tsx": "^4.21.0",
         "typescript": "^5.3.3"
