@@ -116,16 +116,16 @@ export const CONFIDENCE_THRESHOLD = parseFloat(
 export const SUGGESTED_THRESHOLD = parseFloat(process.env.SKILL_SUGGESTED_THRESHOLD || '0.50');
 
 // Skill injection limits to prevent context overload
-// Standard limit is 10 skills - allows broader skill coverage when intent is clear
+// Standard limit is 2 skills to keep prompt-time injection focused.
 // Affinity skills are auto-injected free of slot cost (don't count toward limit)
-export const MAX_REQUIRED_SKILLS = 10; // Maximum critical skills to auto-inject
-export const MAX_SUGGESTED_SKILLS = 10; // Maximum recommended skills to suggest
+export const MAX_REQUIRED_SKILLS = 2; // Maximum critical skills to auto-inject
+export const MAX_SUGGESTED_SKILLS = 2; // Maximum recommended skills to suggest
 
 // Short prompts use keyword matching instead of AI analysis
 // Saves API costs and latency for simple prompts where intent is unclear
-// Override: SKILL_SHORT_PROMPT_WORDS (default: 14 words; AI runs at 15+ words)
+// Override: SKILL_SHORT_PROMPT_WORDS (default: 5 words; AI runs at 6+ words)
 export const SHORT_PROMPT_WORD_THRESHOLD = parseInt(
-  process.env.SKILL_SHORT_PROMPT_WORDS || '14',
+  process.env.SKILL_SHORT_PROMPT_WORDS || '5',
   10
 );
 

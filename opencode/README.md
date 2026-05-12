@@ -55,7 +55,7 @@ Set via environment variables:
 |----------|-------------|---------|
 | `SKILL_CONFIDENCE_THRESHOLD` | Min confidence for required skills | `0.65` |
 | `SKILL_SUGGESTED_THRESHOLD` | Min confidence for suggestions | `0.50` |
-| `SKILL_SHORT_PROMPT_WORDS` | Word count for keyword fallback; AI analysis starts at 15+ words | `14` |
+| `SKILL_SHORT_PROMPT_WORDS` | Word count for keyword fallback; AI analysis starts at 6+ words | `5` |
 | `SKILL_CACHE_TTL_MS` | Cache time-to-live | `1 hour` |
 
 ## Usage
@@ -109,7 +109,7 @@ npm run test:coverage # Run with coverage report
 npm run check         # TypeScript typecheck
 ```
 
-Current coverage: **91.22% statements, 81.01% branch, 92.5% functions, 92.9% lines**
+Current coverage: **38.28% package-wide statements, 37.68% package-wide lines**. The hook library is covered at **80.33% statements, 81.29% lines**; package-wide coverage is lower because the CLI and MCP server entrypoints are mostly uncovered.
 
 ## Limitations vs Claude Code
 

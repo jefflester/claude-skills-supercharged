@@ -168,8 +168,8 @@ describe('intent-scorer', () => {
     };
 
     expect(categorizeSkills(analysis)).toEqual({
-      required: ['required-third', 'required-high', 'required-low'],
-      suggested: ['suggested-high', 'suggested-third', 'suggested-low'],
+      required: ['required-third', 'required-high'],
+      suggested: ['suggested-high', 'suggested-third'],
     });
   });
 
@@ -228,9 +228,9 @@ describe('skill-filtration', () => {
     expect(
       applyInjectionLimits(['guardrail-a', 'domain-a'], ['domain-b', 'domain-c'], 0, mockSkillRules)
     ).toEqual({
-      toInject: ['guardrail-a', 'domain-a', 'domain-b', 'domain-c'],
-      promoted: ['domain-b', 'domain-c'],
-      remainingSuggested: [],
+      toInject: ['guardrail-a', 'domain-a', 'domain-b'],
+      promoted: ['domain-b'],
+      remainingSuggested: ['domain-c'],
     });
   });
 

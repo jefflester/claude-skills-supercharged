@@ -148,7 +148,7 @@ function selectCandidateSkills(
  *
  * Uses AI provider for intent analysis (configurable via OPENCODE_SKILLS_PROVIDER, default: anthropic)
  * to analyze the user's prompt and assign confidence scores to each skill. Falls back to keyword matching for short prompts
- * (<10 words) or if AI analysis fails. Results are cached for 1 hour.
+ * (5 words or fewer by default) or if AI analysis fails. Results are cached for 1 hour.
  *
  * @param prompt - The user's input prompt to analyze
  * @param availableSkills - Record of skill configurations from skill-rules.json
