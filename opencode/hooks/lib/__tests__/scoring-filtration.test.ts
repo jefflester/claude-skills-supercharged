@@ -161,15 +161,21 @@ describe('intent-scorer', () => {
         { name: 'required-low', confidence: CONFIDENCE_THRESHOLD + 0.01, reason: 'first' },
         { name: 'required-high', confidence: CONFIDENCE_THRESHOLD + 0.2, reason: 'second' },
         { name: 'required-third', confidence: CONFIDENCE_THRESHOLD + 0.25, reason: 'third' },
+        { name: 'required-fourth', confidence: CONFIDENCE_THRESHOLD + 0.19, reason: 'fourth' },
+        { name: 'required-fifth', confidence: CONFIDENCE_THRESHOLD + 0.18, reason: 'fifth' },
+        { name: 'required-sixth', confidence: CONFIDENCE_THRESHOLD + 0.17, reason: 'sixth' },
         { name: 'suggested-low', confidence: SUGGESTED_THRESHOLD, reason: 'low' },
         { name: 'suggested-high', confidence: CONFIDENCE_THRESHOLD, reason: 'high' },
         { name: 'suggested-third', confidence: SUGGESTED_THRESHOLD + 0.05, reason: 'third' },
+        { name: 'suggested-fourth', confidence: SUGGESTED_THRESHOLD + 0.04, reason: 'fourth' },
+        { name: 'suggested-fifth', confidence: SUGGESTED_THRESHOLD + 0.03, reason: 'fifth' },
+        { name: 'suggested-sixth', confidence: SUGGESTED_THRESHOLD + 0.02, reason: 'sixth' },
       ],
     };
 
     expect(categorizeSkills(analysis)).toEqual({
-      required: ['required-third', 'required-high'],
-      suggested: ['suggested-high', 'suggested-third'],
+      required: ['required-third', 'required-high', 'required-fourth', 'required-fifth', 'required-sixth'],
+      suggested: ['suggested-high', 'suggested-third', 'suggested-fourth', 'suggested-fifth', 'suggested-sixth'],
     });
   });
 
@@ -226,11 +232,16 @@ describe('skill-filtration', () => {
 
   it('applies injection limits with guardrails exempt from the cap', () => {
     expect(
-      applyInjectionLimits(['guardrail-a', 'domain-a'], ['domain-b', 'domain-c'], 0, mockSkillRules)
+      applyInjectionLimits(
+        ['guardrail-a', 'domain-a'],
+        ['domain-b', 'domain-c', 'domain-d', 'domain-e', 'domain-f'],
+        0,
+        mockSkillRules
+      )
     ).toEqual({
-      toInject: ['guardrail-a', 'domain-a', 'domain-b'],
-      promoted: ['domain-b'],
-      remainingSuggested: ['domain-c'],
+      toInject: ['guardrail-a', 'domain-a', 'domain-b', 'domain-c', 'domain-d', 'domain-e'],
+      promoted: ['domain-b', 'domain-c', 'domain-d', 'domain-e'],
+      remainingSuggested: ['domain-f'],
     });
   });
 

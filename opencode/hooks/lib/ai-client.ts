@@ -9,25 +9,35 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
+import { debugLog } from './debug-logger.js';
 import type { IntentAnalysis, SkillRule } from './types.js';
 
 export type AIProvider = 'anthropic' | 'openai' | 'ollama';
 
-function getProvider(): AIProvider {
+interface ApiKeyCredential {
+  apiKey: string;
+  source: 'environment' | 'opencode-auth';
+}
+
+export function getProvider(): AIProvider {
   const provider = process.env.OPENCODE_SKILLS_PROVIDER?.toLowerCase();
 
-  if (provider === 'openai' || provider === 'ollama') {
+  if (provider === 'anthropic' || provider === 'openai' || provider === 'ollama') {
     return provider;
   }
 
   return 'anthropic';
 }
 
-function getModel(provider: AIProvider): string {
+export function getModel(provider: AIProvider): string {
   const configuredModel = process.env.OPENCODE_SKILLS_MODEL;
 
   if (configuredModel) {
-    return configuredModel;
+    const providerPrefix = `${provider}/`;
+    return configuredModel.startsWith(providerPrefix)
+      ? configuredModel.slice(providerPrefix.length)
+      : configuredModel;
   }
 
   if (provider === 'openai') {
@@ -41,7 +51,71 @@ function getModel(provider: AIProvider): string {
   return 'claude-haiku-4-5';
 }
 
-function getPromptTemplate(): string {
+function getOpenCodeAuthPathCandidates(): string[] {
+  const candidates: string[] = [];
+
+  if (process.env.OPENCODE_AUTH_PATH) {
+    candidates.push(process.env.OPENCODE_AUTH_PATH);
+  }
+
+  if (process.env.XDG_DATA_HOME) {
+    candidates.push(join(process.env.XDG_DATA_HOME, 'opencode', 'auth.json'));
+  }
+
+  if (process.platform === 'win32') {
+    if (process.env.APPDATA) {
+      candidates.push(join(process.env.APPDATA, 'opencode', 'auth.json'));
+    }
+    candidates.push(join(homedir(), 'AppData', 'Roaming', 'opencode', 'auth.json'));
+  }
+
+  candidates.push(join(homedir(), '.local', 'share', 'opencode', 'auth.json'));
+
+  return Array.from(new Set(candidates));
+}
+
+function readOpenCodeApiKey(provider: 'anthropic' | 'openai'): string | undefined {
+  for (const authPath of getOpenCodeAuthPathCandidates()) {
+    if (!existsSync(authPath)) {
+      continue;
+    }
+
+    try {
+      const authStore = JSON.parse(readFileSync(authPath, 'utf-8')) as Record<
+        string,
+        { type?: unknown; key?: unknown }
+      >;
+      const providerCredential = authStore[provider];
+
+      if (providerCredential?.type === 'api' && typeof providerCredential.key === 'string') {
+        const key = providerCredential.key.trim();
+        if (key.length > 0) {
+          return key;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+function getAnthropicApiKey(): ApiKeyCredential | undefined {
+  const envKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (envKey) {
+    return { apiKey: envKey, source: 'environment' };
+  }
+
+  const authKey = readOpenCodeApiKey('anthropic');
+  if (authKey) {
+    return { apiKey: authKey, source: 'opencode-auth' };
+  }
+
+  return undefined;
+}
+
+export function getPromptTemplate(): string {
   const projectDir = process.env.OPENCODE_PROJECT_DIR || process.cwd();
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const promptPaths = [
@@ -78,7 +152,7 @@ function buildSkillDescriptions(skills: Record<string, SkillRule>): string {
     .join('\n');
 }
 
-function buildPrompt(prompt: string, skills: Record<string, SkillRule>): string {
+export function buildPrompt(prompt: string, skills: Record<string, SkillRule>): string {
   const promptTemplate = getPromptTemplate();
 
   return promptTemplate
@@ -106,7 +180,7 @@ function stripMarkdownFences(content: string): string {
   return lines.join('\n').trim();
 }
 
-function parseIntentAnalysis(content: string): IntentAnalysis {
+export function parseIntentAnalysis(content: string): IntentAnalysis {
   const parsedContent = stripMarkdownFences(content);
 
   // Fallback: extract JSON object from text that may contain preamble
@@ -175,11 +249,11 @@ function parseIntentAnalysis(content: string): IntentAnalysis {
 }
 
 async function callAnthropicIntentAnalysis(prompt: string): Promise<IntentAnalysis> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const credential = getAnthropicApiKey();
 
-  if (!apiKey) {
+  if (!credential) {
     throw new Error(
-      'Missing ANTHROPIC_API_KEY. Set ANTHROPIC_API_KEY to use Anthropic, or choose OPENCODE_SKILLS_PROVIDER=openai with OPENAI_API_KEY, or OPENCODE_SKILLS_PROVIDER=ollama for local inference.'
+      'Missing Anthropic API key. Set ANTHROPIC_API_KEY or add Anthropic API credentials to OpenCode auth.'
     );
   }
 
@@ -194,8 +268,9 @@ async function callAnthropicIntentAnalysis(prompt: string): Promise<IntentAnalys
   }
 
   const AnthropicClient = anthropicModule.default;
-  const client = new AnthropicClient({ apiKey });
+  const client = new AnthropicClient({ apiKey: credential.apiKey });
   const model = getModel('anthropic');
+  debugLog(`intent analysis provider=anthropic model=${model} authSource=${credential.source}`);
 
   try {
     const response = await client.messages.create({

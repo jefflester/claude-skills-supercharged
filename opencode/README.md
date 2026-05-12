@@ -45,9 +45,10 @@ Set via environment variables:
 | `OPENCODE_SKILLS_DEBUG` | Enable debug logging (`1` to enable) | `0` |
 | `OPENCODE_SKILLS_PROVIDER` | AI provider: `anthropic`, `openai`, `ollama` | `anthropic` |
 | `OPENCODE_SKILLS_MODEL` | Model override | Provider-specific |
-| `ANTHROPIC_API_KEY` | Anthropic API key | Required for Anthropic |
+| `ANTHROPIC_API_KEY` | Anthropic API key | Optional when Anthropic is configured in OpenCode auth |
 | `OPENAI_API_KEY` | OpenAI API key | Required for OpenAI |
 | `OLLAMA_BASE_URL` | Ollama endpoint | `http://localhost:11434` |
+| `OPENCODE_AUTH_PATH` | Explicit OpenCode auth store path for API credentials | Auto-discovered from OpenCode data dir |
 
 ### Thresholds
 

@@ -2,7 +2,7 @@
  * Skill filtering, promotion, and affinity injection logic
  *
  * Handles filtering of acknowledged skills, promotion of suggested skills to
- * fill the 2-skill target, and bidirectional affinity-based auto-injection.
+ * fill the configured skill target, and bidirectional affinity-based auto-injection.
  */
 
 import type { SkillRule } from './types.js';
@@ -58,7 +58,7 @@ export function applyInjectionLimits(
   const recommendedDomain = recommendedSkills.filter((s) => skillRules[s]?.type !== 'guardrail');
   const recommendedGuardrails = recommendedSkills.filter((s) => skillRules[s]?.type === 'guardrail');
 
-  // Calculate promotion target for domain skills: 2 total - already loaded domain critical
+  // Calculate promotion target for domain skills: cap total - already loaded domain critical
   const promotionTarget = Math.max(0, TARGET_SLOTS - acknowledgedCriticalCount);
 
   // Start with critical domain skills (up to promotion target)
@@ -96,7 +96,7 @@ export function applyInjectionLimits(
  * - If any skill lists A in its affinity, inject that skill (child → parent)
  *
  * Respects acknowledged skills (don't re-inject).
- * Free of slot cost (affinity skills don't count toward 2-skill limit).
+ * Free of slot cost (affinity skills don't count toward the injection limit).
  *
  * @param toInject - Skills being injected
  * @param acknowledged - Already loaded skills
