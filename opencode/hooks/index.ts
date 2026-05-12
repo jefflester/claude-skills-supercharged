@@ -3,13 +3,23 @@ import { join } from 'path';
 import { analyzeIntent } from './lib/intent-analyzer.js';
 import { resolveSkillDependencies } from './lib/skill-resolution.js';
 import { filterAndPromoteSkills, findAffinityInjections } from './lib/skill-filtration.js';
-import { readAcknowledgedSkills, writeSessionState } from './lib/skill-state-manager.js';
+import {
+  readAcknowledgedState,
+  getSessionStatePath,
+  getSafeLegacySessionStatePath,
+  writeSessionState,
+} from './lib/skill-state-manager.js';
+import { discoverCommands, resolveCommandDiscoveryOptions } from './lib/command-discovery.js';
+import { filterCommandReferences } from './lib/command-filtration.js';
 import {
   injectSkillContent,
   formatActivationBanner,
   formatJustInjectedSection,
   formatAlreadyLoadedSection,
   formatRecommendedSection,
+  formatAlreadyLoadedCommandReferences,
+  formatMandatoryCommandReferences,
+  formatSuggestedCommandReferences,
   formatClosingBanner,
 } from './lib/output-formatter.js';
 import { debugLog } from './lib/debug-logger.js';
@@ -147,12 +157,18 @@ async function loadSkillRules(): Promise<SkillRulesConfig> {
 }
 
 async function removeSessionStateFile(stateDirectory: string, sessionID: string): Promise<void> {
-  const sessionStatePath = join(stateDirectory, `${sessionID}-skills-suggested.json`);
+  const pathsToRemove = [getSessionStatePath(stateDirectory, sessionID)];
+  const safeLegacyPath = getSafeLegacySessionStatePath(stateDirectory, sessionID);
+  if (safeLegacyPath) {
+    pathsToRemove.push(safeLegacyPath);
+  }
 
-  try {
-    await unlink(sessionStatePath);
-  } catch (error) {
-    debugLog(`Failed to remove session state ${sessionStatePath}: ${String(error)}`);
+  for (const sessionStatePath of pathsToRemove) {
+    try {
+      await unlink(sessionStatePath);
+    } catch (error) {
+      debugLog(`Failed to remove session state ${sessionStatePath}: ${String(error)}`);
+    }
   }
 }
 
@@ -213,6 +229,7 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
   const projectDirectory = process.env.OPENCODE_PROJECT_DIR || process.cwd();
   const stateDirectory = await resolveStateDirectory(input.directory, projectDirectory);
   const skillRules = await loadSkillRules();
+  let commandRules = discoverCommands(resolveCommandDiscoveryOptions(projectDirectory));
   const availableSkillNames = new Set(Object.keys(skillRules.skills));
 
   async function fetchUserPrompt(sessionID: string): Promise<string> {
@@ -236,7 +253,7 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
             }
 
             sessionRuntimeState.set(sessionID, { injected: false });
-            writeSessionState(stateDirectory, sessionID, [], []);
+            writeSessionState(stateDirectory, sessionID, [], [], [], []);
             return;
           }
 
@@ -258,7 +275,7 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
             }
 
             sessionRuntimeState.delete(sessionID);
-            writeSessionState(stateDirectory, sessionID, [], []);
+            writeSessionState(stateDirectory, sessionID, [], [], [], []);
             return;
           }
 
@@ -278,6 +295,8 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
     },
     'experimental.chat.system.transform': async ({ sessionID }, output) => {
       try {
+        commandRules = discoverCommands(resolveCommandDiscoveryOptions(projectDirectory));
+        const availableCommandNames = new Set(Object.keys(commandRules));
         let runtimeState = sessionRuntimeState.get(sessionID);
         if (runtimeState?.injected) {
           return;
@@ -290,7 +309,7 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
             return;
           }
 
-          const analysis = await analyzeIntent(userPrompt, skillRules.skills);
+          const analysis = await analyzeIntent(userPrompt, skillRules.skills, commandRules);
           runtimeState = {
             analysis,
             injected: false,
@@ -301,7 +320,9 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
           );
         }
 
-        const acknowledgedSkills = readAcknowledgedSkills(stateDirectory, sessionID);
+        const acknowledgedState = readAcknowledgedState(stateDirectory, sessionID);
+        const acknowledgedSkills = acknowledgedState.acknowledgedSkills;
+        const acknowledgedCommands = acknowledgedState.acknowledgedCommands;
         const analysis = runtimeState.analysis;
         if (!analysis) {
           debugLog(`system.transform skipped session=${sessionID}: analysis unavailable`);
@@ -313,6 +334,24 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
         );
         const suggestedSkills = analysis.suggested.filter((skillName) =>
           availableSkillNames.has(skillName)
+        );
+        const requiredCommands = (analysis.requiredCommands || []).filter((commandName) =>
+          availableCommandNames.has(commandName)
+        );
+        const suggestedCommands = (analysis.suggestedCommands || []).filter((commandName) =>
+          availableCommandNames.has(commandName)
+        );
+        const commandFiltration = filterCommandReferences(
+          requiredCommands,
+          suggestedCommands,
+          acknowledgedCommands
+        );
+        const alreadyLoadedCommands = Array.from(
+          new Set(
+            [...requiredCommands, ...suggestedCommands].filter((commandName) =>
+              acknowledgedCommands.includes(commandName)
+            )
+          )
         );
 
         const filtration = filterAndPromoteSkills(
@@ -339,10 +378,15 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
 
         const summaryParts: string[] = [];
         const shouldShowSummary =
-          injectedSkills.length > 0 || acknowledgedSkills.length > 0 || filtration.remainingSuggested.length > 0;
+          injectedSkills.length > 0 ||
+          acknowledgedSkills.length > 0 ||
+          filtration.remainingSuggested.length > 0 ||
+          commandFiltration.toInject.length > 0 ||
+          commandFiltration.remainingSuggested.length > 0 ||
+          alreadyLoadedCommands.length > 0;
 
         debugLog(
-          `system.transform selected session=${sessionID} inject=${injectedSkills.join(',')} recommended=${filtration.remainingSuggested.join(',')} acknowledged=${acknowledgedSkills.join(',')}`
+          `system.transform selected session=${sessionID} inject=${injectedSkills.join(',')} recommended=${filtration.remainingSuggested.join(',')} commandInject=${commandFiltration.toInject.join(',')} commandSuggested=${commandFiltration.remainingSuggested.join(',')} acknowledged=${acknowledgedSkills.join(',')}`
         );
 
         if (shouldShowSummary) {
@@ -362,23 +406,63 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
           }
 
           summaryParts.push(formatRecommendedSection(filtration.remainingSuggested, analysis.scores));
+          summaryParts.push(
+            formatMandatoryCommandReferences(
+              commandFiltration.toInject,
+              commandRules,
+              analysis.commandScores
+            )
+          );
+          summaryParts.push(
+            formatSuggestedCommandReferences(
+              commandFiltration.remainingSuggested,
+              commandRules,
+              analysis.commandScores
+            )
+          );
+          summaryParts.push(formatAlreadyLoadedCommandReferences(alreadyLoadedCommands, commandRules));
           summaryParts.push(formatClosingBanner());
 
-          output.system.push(summaryParts.join(''));
+          const summaryBlock = summaryParts.join('');
+          debugLog(`system.transform reference summary session=${sessionID}\n${summaryBlock}`);
+          output.system.push(summaryBlock);
         }
 
         if (injectedSkills.length > 0) {
-          const xmlContent = injectSkillContent(injectedSkills);
-          if (xmlContent.length > 0) {
-            output.system.push(xmlContent);
+          const skillReferenceBlock = injectSkillContent(injectedSkills);
+          if (skillReferenceBlock.length > 0) {
+            debugLog(
+              `system.transform skill reference block session=${sessionID}\n${skillReferenceBlock}`
+            );
+            output.system.push(skillReferenceBlock);
 
             const updatedAcknowledgedSkills = Array.from(
               new Set([...acknowledgedSkills, ...injectedSkills])
             );
-            writeSessionState(stateDirectory, sessionID, updatedAcknowledgedSkills, injectedSkills);
+            const updatedAcknowledgedCommands = Array.from(
+              new Set([...acknowledgedCommands, ...commandFiltration.toInject])
+            );
+            writeSessionState(
+              stateDirectory,
+              sessionID,
+              updatedAcknowledgedSkills,
+              injectedSkills,
+              updatedAcknowledgedCommands,
+              commandFiltration.toInject
+            );
           }
         } else {
-          writeSessionState(stateDirectory, sessionID, acknowledgedSkills, []);
+          const updatedAcknowledgedCommands = Array.from(
+            new Set([...acknowledgedCommands, ...commandFiltration.toInject])
+          );
+          writeSessionState(
+            stateDirectory,
+            sessionID,
+            acknowledgedSkills,
+            [],
+            updatedAcknowledgedCommands,
+            commandFiltration.toInject
+          );
         }
 
         sessionRuntimeState.set(sessionID, {

@@ -1,12 +1,6 @@
-import { existsSync, readFileSync } from 'fs';
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock all external modules before importing our modules
-vi.mock('fs', () => ({
-  existsSync: vi.fn(),
-  readFileSync: vi.fn(),
-}));
-
 // Mock AI provider modules
 vi.mock('@anthropic-ai/sdk', () => ({
   default: vi.fn().mockImplementation(() => ({
@@ -59,9 +53,6 @@ import {
 import { getProvider, getModel, parseIntentAnalysis, buildPrompt, callAIForIntentAnalysis } from '../ai-client.js';
 import { analyzeIntent } from '../intent-analyzer.js';
 import type { AnalysisResult, IntentAnalysis, SkillRule } from '../types.js';
-
-const mockedExistsSync = vi.mocked(existsSync);
-const mockedReadFileSync = vi.mocked(readFileSync);
 
 const mockSkillRules: Record<string, SkillRule> = {
   'guardrail-a': { type: 'guardrail' },
@@ -263,16 +254,14 @@ describe('skill-filtration', () => {
 });
 
 describe('output-formatter', () => {
-  it('injects skill content when files exist', () => {
-    mockedExistsSync.mockReturnValue(true);
-    mockedReadFileSync.mockReturnValue('## Skill Content');
-
+  it('injects skill pointers instead of skill content', () => {
     const output = injectSkillContent(['skill-a'], 'C:\\project');
 
-    expect(output).toContain('📚 AUTO-LOADED SKILLS');
-    expect(output).toContain('<skill name="skill-a">');
-    expect(output).toContain('## Skill Content');
-    expect(output).toContain('Loaded 1 skill(s): skill-a');
+    expect(output).toContain('📚 AUTO-REFERENCED SKILLS');
+    expect(output).toContain('[$skill-a](C:\\project\\skill-a\\SKILL.md)');
+    expect(output).not.toContain('<skill name="skill-a">');
+    expect(output).not.toContain('## Skill Content');
+    expect(output).toContain('Referenced 1 skill(s): skill-a');
   });
 
   it('returns an empty string when no skills are injected', () => {
@@ -283,13 +272,29 @@ describe('output-formatter', () => {
     expect(formatActivationBanner()).toBe(
       '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎯 SKILL ACTIVATION CHECK\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
     );
-    expect(formatJustInjectedSection(['a', 'b', 'c'], ['c'], ['a'], ['b'])).toBe(
-      '\n📚 JUST LOADED:\n  → a (affinity)\n  → b (promoted)\n  → c (critical)\n'
-    );
-    expect(formatAlreadyLoadedSection(['x', 'y'])).toBe('\n✓ ALREADY LOADED:\n  → x\n  → y\n');
-    expect(formatRecommendedSection(['r1', 'r2'], { r1: 0.6, r2: 0.5 })).toBe(
-      '\n📚 RECOMMENDED SKILLS (not auto-loaded):\n  → r1 (0.60)\n  → r2 (0.50)\n\nOptional: Use Skill tool to load if needed\n'
-    );
+    const justReferenced = formatJustInjectedSection(['a', 'b', 'c'], ['c'], ['a'], ['b']);
+    expect(justReferenced).toContain('📚 JUST REFERENCED');
+    expect(justReferenced).toContain('[$a]');
+    expect(justReferenced).toContain('a\\SKILL.md) (affinity)');
+    expect(justReferenced).toContain('[$b]');
+    expect(justReferenced).toContain('b\\SKILL.md) (promoted)');
+    expect(justReferenced).toContain('[$c]');
+    expect(justReferenced).toContain('c\\SKILL.md) (critical)');
+
+    const alreadyReferenced = formatAlreadyLoadedSection(['x', 'y']);
+    expect(alreadyReferenced).toContain('✓ ALREADY REFERENCED');
+    expect(alreadyReferenced).toContain('[$x]');
+    expect(alreadyReferenced).toContain('x\\SKILL.md');
+    expect(alreadyReferenced).toContain('[$y]');
+    expect(alreadyReferenced).toContain('y\\SKILL.md');
+
+    const recommended = formatRecommendedSection(['r1', 'r2'], { r1: 0.6, r2: 0.5 });
+    expect(recommended).toContain('📚 RECOMMENDED SKILLS (not auto-loaded)');
+    expect(recommended).toContain('[$r1]');
+    expect(recommended).toContain('r1\\SKILL.md) (0.60)');
+    expect(recommended).toContain('[$r2]');
+    expect(recommended).toContain('r2\\SKILL.md) (0.50)');
+    expect(recommended).toContain('Optional: Open referenced SKILL.md if needed');
     expect(formatClosingBanner()).toBe('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
   });
 });

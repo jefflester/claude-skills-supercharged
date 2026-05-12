@@ -5,19 +5,49 @@
  * already-loaded sections, recommended skills, and manual load reminders.
  */
 
-import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 import { SKILLS_DIR } from './constants.js';
+import type { CommandRule } from './types.js';
+
+function sanitizeCommandName(commandName: string): string {
+  return commandName
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/^\/+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatMarkdownLinkTarget(target: string): string {
+  return /\s/.test(target) ? `<${target}>` : target;
+}
+
+function formatCommandReference(
+  commandName: string,
+  commandRules: Record<string, CommandRule>
+): string {
+  const safeCommandName = sanitizeCommandName(commandName);
+  const sourcePath = commandRules[commandName]?.sourcePath;
+  if (!sourcePath) {
+    return `/${safeCommandName}`;
+  }
+
+  return `[$${safeCommandName}](${formatMarkdownLinkTarget(sourcePath)})`;
+}
+
+function formatSkillReference(skillName: string, skillsDir = SKILLS_DIR): string {
+  const skillPath = join(skillsDir, skillName, 'SKILL.md');
+  return `[$${skillName}](${formatMarkdownLinkTarget(skillPath)})`;
+}
 
 /**
- * Inject skill content into system context
+ * Inject skill pointers into system context
  *
- * Reads skill files and formats them with XML tags for Claude to process.
- * Returns formatted string with banner and skill content.
+ * Keeps system context lightweight by referencing SKILL.md files instead of
+ * embedding full skill bodies.
  *
- * @param skillNames - Names of skills to inject
- * @param projectDir - Project root directory
+ * @param skillNames - Names of skills to reference
+ * @param projectDir - Skills root directory
  * @returns Formatted skill injection output
  */
 export function injectSkillContent(skillNames: string[], projectDir?: string): string {
@@ -27,29 +57,15 @@ export function injectSkillContent(skillNames: string[], projectDir?: string): s
 
   let output = '\n';
   output += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-  output += '📚 AUTO-LOADED SKILLS\n';
+  output += '📚 AUTO-REFERENCED SKILLS\n';
   output += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
   for (const skillName of skillNames) {
-    const skillPath = join(resolvedDir, skillName, 'SKILL.md');
-
-    if (existsSync(skillPath)) {
-      try {
-        const skillContent = readFileSync(skillPath, 'utf-8');
-
-        output += `<skill name="${skillName}">\n`;
-        output += skillContent;
-        output += `\n</skill>\n\n`;
-      } catch (err) {
-        console.error(`⚠️ Failed to load skill ${skillName}:`, err);
-      }
-    } else {
-      console.warn(`⚠️ Skill file not found: ${skillPath}`);
-    }
+    output += `  → ${formatSkillReference(skillName, resolvedDir)}\n`;
   }
 
   output += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-  output += `Loaded ${skillNames.length} skill(s): ${skillNames.join(', ')}\n`;
+  output += `Referenced ${skillNames.length} skill(s): ${skillNames.join(', ')}\n`;
   output += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
 
   return output;
@@ -89,7 +105,7 @@ export function formatJustInjectedSection(
 ): string {
   if (injectedSkills.length === 0) return '';
 
-  let output = '\n📚 JUST LOADED:\n';
+  let output = '\n📚 JUST REFERENCED:\n';
 
   injectedSkills.forEach((skill) => {
     let label = '';
@@ -100,7 +116,7 @@ export function formatJustInjectedSection(
     } else if (criticalSkills.includes(skill)) {
       label = ' (critical)';
     }
-    output += `  → ${skill}${label}\n`;
+    output += `  → ${formatSkillReference(skill)}${label}\n`;
   });
 
   return output;
@@ -118,9 +134,9 @@ export function formatJustInjectedSection(
 export function formatAlreadyLoadedSection(alreadyLoaded: string[]): string {
   if (alreadyLoaded.length === 0) return '';
 
-  let output = '\n✓ ALREADY LOADED:\n';
+  let output = '\n✓ ALREADY REFERENCED:\n';
   alreadyLoaded.forEach((name) => {
-    output += `  → ${name}\n`;
+    output += `  → ${formatSkillReference(name)}\n`;
   });
   return output;
 }
@@ -142,13 +158,13 @@ export function formatRecommendedSection(
 
   let output = '\n📚 RECOMMENDED SKILLS (not auto-loaded):\n';
   recommendedSkills.forEach((name) => {
-    output += `  → ${name}`;
+    output += `  → ${formatSkillReference(name)}`;
     if (scores && scores[name]) {
       output += ` (${scores[name].toFixed(2)})`;
     }
     output += '\n';
   });
-  output += '\nOptional: Use Skill tool to load if needed\n';
+  output += '\nOptional: Open referenced SKILL.md if needed\n';
   return output;
 }
 
@@ -159,4 +175,62 @@ export function formatRecommendedSection(
  */
 export function formatClosingBanner(): string {
   return '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+}
+
+/**
+ * Format mandatory command references (names + metadata only)
+ */
+export function formatMandatoryCommandReferences(
+  requiredCommands: string[],
+  commandRules: Record<string, CommandRule>,
+  scores?: Record<string, number>
+): string {
+  if (requiredCommands.length === 0) return '';
+
+  let output = '\n🧭 REQUIRED COMMANDS:\n';
+  for (const commandName of requiredCommands) {
+    output += `  → ${formatCommandReference(commandName, commandRules)}`;
+    if (scores && typeof scores[commandName] === 'number') {
+      output += ` (${scores[commandName].toFixed(2)})`;
+    }
+    output += '\n';
+  }
+
+  return output;
+}
+
+/**
+ * Format suggested command references (names + metadata only)
+ */
+export function formatSuggestedCommandReferences(
+  suggestedCommands: string[],
+  commandRules: Record<string, CommandRule>,
+  scores?: Record<string, number>
+): string {
+  if (suggestedCommands.length === 0) return '';
+
+  let output = '\n🧭 SUGGESTED COMMANDS:\n';
+  for (const commandName of suggestedCommands) {
+    output += `  → ${formatCommandReference(commandName, commandRules)}`;
+    if (scores && typeof scores[commandName] === 'number') {
+      output += ` (${scores[commandName].toFixed(2)})`;
+    }
+    output += '\n';
+  }
+
+  return output;
+}
+
+export function formatAlreadyLoadedCommandReferences(
+  commandNames: string[],
+  commandRules: Record<string, CommandRule> = {}
+): string {
+  if (commandNames.length === 0) return '';
+
+  let output = '\n✓ ALREADY LOADED COMMANDS:\n';
+  for (const commandName of commandNames) {
+    output += `  → ${formatCommandReference(commandName, commandRules)}\n`;
+  }
+
+  return output;
 }

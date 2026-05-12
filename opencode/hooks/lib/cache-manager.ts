@@ -17,10 +17,13 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { CACHE_TTL_MS, CACHE_CLEANUP_AGE_MS, DEBUG_ENABLED } from './constants.js';
-import type { CacheEntry } from './types.js';
+import type { AnalysisResult, CacheEntry } from './types.js';
+import { debugLog } from './debug-logger.js';
 
 // Use project root for cache directory, not hooks cwd
 const CACHE_DIR = join(process.cwd(), '.opencode', 'cache', 'intent-analysis');
+const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+let lastCacheCleanupAt = 0;
 
 /**
  * Read cached intent analysis result
@@ -28,9 +31,10 @@ const CACHE_DIR = join(process.cwd(), '.opencode', 'cache', 'intent-analysis');
  * @param key - MD5 hash of prompt + skills configuration
  * @returns Cached result if found and not expired, null otherwise
  */
-export function readCache(key: string): { required: string[]; suggested: string[] } | null {
+export function readCache(key: string): AnalysisResult | null {
   const cachePath = join(CACHE_DIR, `${key}.json`);
   if (!existsSync(cachePath)) {
+    debugLog(`cache-manager: cache miss key=${key} path=${cachePath}`);
     return null;
   }
 
@@ -42,8 +46,19 @@ export function readCache(key: string): { required: string[]; suggested: string[
       return null; // Expired
     }
 
-    return data.result;
-  } catch {
+    return {
+      required: data.result.required || [],
+      suggested: data.result.suggested || [],
+      requiredCommands: data.result.requiredCommands || [],
+      suggestedCommands: data.result.suggestedCommands || [],
+      commandScores: data.result.commandScores || {},
+    };
+  } catch (error) {
+    debugLog(
+      `cache-manager: failed to read/parse key=${key} path=${cachePath} reason=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return null;
   }
 }
@@ -56,14 +71,19 @@ export function readCache(key: string): { required: string[]; suggested: string[
  * @param key - MD5 hash of prompt + skills configuration
  * @param result - Analysis result to cache
  */
-export function writeCache(key: string, result: { required: string[]; suggested: string[] }): void {
+export function writeCache(
+  key: string,
+  result: Pick<
+    AnalysisResult,
+    'required' | 'suggested' | 'requiredCommands' | 'suggestedCommands' | 'commandScores'
+  >
+): void {
   // Ensure cache directory exists
   if (!existsSync(CACHE_DIR)) {
     mkdirSync(CACHE_DIR, { recursive: true });
   }
 
-  // Cleanup old cache entries (>24 hours)
-  cleanupOldCacheEntries();
+  maybeCleanupOldCacheEntries();
 
   const cachePath = join(CACHE_DIR, `${key}.json`);
   const entry: CacheEntry = {
@@ -80,14 +100,23 @@ export function writeCache(key: string, result: { required: string[]; suggested:
  * Runs automatically during writeCache to prevent unbounded cache growth.
  * Failures are logged in debug mode but don't fail the operation.
  */
-function cleanupOldCacheEntries(): void {
+function maybeCleanupOldCacheEntries(): void {
+  const now = Date.now();
+  if (now - lastCacheCleanupAt < CACHE_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+  lastCacheCleanupAt = now;
+
+  cleanupOldCacheEntries(now);
+}
+
+function cleanupOldCacheEntries(now: number): void {
   try {
     if (!existsSync(CACHE_DIR)) {
       return;
     }
 
     const files = readdirSync(CACHE_DIR);
-    const now = Date.now();
 
     files.forEach((file) => {
       const filePath = join(CACHE_DIR, file);

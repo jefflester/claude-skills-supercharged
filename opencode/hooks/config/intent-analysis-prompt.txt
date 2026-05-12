@@ -5,6 +5,9 @@ User prompt: "{{USER_PROMPT}}"
 Available skills:
 {{SKILL_DESCRIPTIONS}}
 
+Available commands:
+{{COMMAND_DESCRIPTIONS}}
+
 IMPORTANT SCORING GUIDANCE:
 Confidence Thresholds:
 - > 0.65: REQUIRED (auto-injected as critical skill)
@@ -76,5 +79,8 @@ Response format:
   "primary_intent": "brief description of main task",
   "skills": [
     {"name": "skill-name", "confidence": 0.95, "reason": "why this skill is relevant"}
+  ],
+  "commands": [
+    {"name": "command-name", "confidence": 0.95, "reason": "why this command is relevant"}
   ]
 }

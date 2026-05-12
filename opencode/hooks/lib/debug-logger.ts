@@ -7,10 +7,12 @@
 
 import { appendFileSync, existsSync, mkdirSync, statSync, renameSync } from 'fs';
 import { join } from 'path';
-import { DEBUG_ENABLED } from './constants.js';
 
-const DEBUG_SKILLS = DEBUG_ENABLED;
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
+
+function isDebugEnabled(): boolean {
+  return process.env.OPENCODE_SKILLS_DEBUG === '1';
+}
 
 /**
  * Log debug message to skill injection debug log
@@ -22,7 +24,7 @@ const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
  * @param message - Message to log
  */
 export function debugLog(message: string): void {
-  if (!DEBUG_SKILLS) return;
+  if (!isDebugEnabled()) return;
 
   try {
     const logDirectory = join(

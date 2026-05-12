@@ -11,7 +11,7 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { debugLog } from './debug-logger.js';
-import type { IntentAnalysis, SkillRule } from './types.js';
+import type { CommandRule, IntentAnalysis, SkillRule } from './types.js';
 
 export type AIProvider = 'anthropic' | 'openai' | 'ollama';
 
@@ -152,12 +152,39 @@ function buildSkillDescriptions(skills: Record<string, SkillRule>): string {
     .join('\n');
 }
 
-export function buildPrompt(prompt: string, skills: Record<string, SkillRule>): string {
-  const promptTemplate = getPromptTemplate();
+function buildCommandDescriptions(commands: Record<string, CommandRule>): string {
+  const sanitizeName = (name: string): string =>
+    name
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-  return promptTemplate
+  return Object.entries(commands)
+    .map(([commandName]) => `- ${sanitizeName(commandName)}`)
+    .join('\n');
+}
+
+export function buildPrompt(
+  prompt: string,
+  skills: Record<string, SkillRule>,
+  commands: Record<string, CommandRule> = {}
+): string {
+  const promptTemplate = getPromptTemplate();
+  const commandDescriptions = buildCommandDescriptions(commands);
+  const renderedPrompt = promptTemplate
     .replace(/\{\{USER_PROMPT\}\}/g, () => prompt)
-    .replace(/\{\{SKILL_DESCRIPTIONS\}\}/g, () => buildSkillDescriptions(skills));
+    .replace(/\{\{SKILL_DESCRIPTIONS\}\}/g, () => buildSkillDescriptions(skills))
+    .replace(/\{\{COMMAND_DESCRIPTIONS\}\}/g, () => commandDescriptions);
+
+  if (promptTemplate.includes('{{COMMAND_DESCRIPTIONS}}')) {
+    return renderedPrompt;
+  }
+
+  if (Object.keys(commands).length === 0) {
+    return renderedPrompt;
+  }
+
+  return `${renderedPrompt}\n\nAvailable commands:\n${commandDescriptions}`;
 }
 
 function stripMarkdownFences(content: string): string {
@@ -202,6 +229,7 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
     const candidateAnalysis = parsedValue as {
       primary_intent: unknown;
       skills: unknown;
+      commands?: unknown;
     };
 
     if (typeof candidateAnalysis.primary_intent !== 'string') {
@@ -238,9 +266,43 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
       };
     });
 
+    let commands: { name: string; confidence: number; reason: string }[] = [];
+    if (candidateAnalysis.commands !== undefined) {
+      if (!Array.isArray(candidateAnalysis.commands)) {
+        throw new Error('commands must be an array when provided.');
+      }
+
+      commands = candidateAnalysis.commands.map((commandEntry) => {
+        if (typeof commandEntry !== 'object' || commandEntry === null) {
+          throw new Error('Each command entry must be an object.');
+        }
+
+        const candidateCommand = commandEntry as {
+          name: unknown;
+          confidence: unknown;
+          reason: unknown;
+        };
+
+        if (
+          typeof candidateCommand.name !== 'string' ||
+          typeof candidateCommand.confidence !== 'number' ||
+          typeof candidateCommand.reason !== 'string'
+        ) {
+          throw new Error('Each command entry must include name, confidence, and reason fields.');
+        }
+
+        return {
+          name: candidateCommand.name.trim(),
+          confidence: candidateCommand.confidence,
+          reason: candidateCommand.reason,
+        };
+      });
+    }
+
     return {
       primary_intent: candidateAnalysis.primary_intent,
       skills,
+      commands,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -394,10 +456,11 @@ async function callOllamaIntentAnalysis(prompt: string): Promise<IntentAnalysis>
 
 export async function callAIForIntentAnalysis(
   prompt: string,
-  skills: Record<string, SkillRule>
+  skills: Record<string, SkillRule>,
+  commands: Record<string, CommandRule> = {}
 ): Promise<IntentAnalysis> {
   const provider = getProvider();
-  const analysisPrompt = buildPrompt(prompt, skills);
+  const analysisPrompt = buildPrompt(prompt, skills, commands);
 
   if (provider === 'openai') {
     return callOpenAIIntentAnalysis(analysisPrompt);

@@ -15,11 +15,21 @@ export interface SkillConfidence {
 }
 
 /**
+ * Command confidence score from AI intent analysis
+ */
+export interface CommandConfidence {
+  name: string;
+  confidence: number;
+  reason: string;
+}
+
+/**
  * AI intent analysis result from Anthropic API
  */
 export interface IntentAnalysis {
   primary_intent: string;
   skills: SkillConfidence[];
+  commands?: CommandConfidence[];
 }
 
 /**
@@ -30,6 +40,9 @@ export interface AnalysisResult {
   suggested: string[];
   fromCache?: boolean;
   scores?: Record<string, number>; // skill name -> confidence score (debug mode)
+  requiredCommands?: string[];
+  suggestedCommands?: string[];
+  commandScores?: Record<string, number>;
 }
 
 /**
@@ -61,10 +74,24 @@ export interface SkillRulesConfig {
 }
 
 /**
+ * Command rule configuration from OpenCode config/markdown
+ */
+export interface CommandRule {
+  description?: string;
+  template: string;
+  agent?: string;
+  subtask?: boolean;
+  model?: string;
+  source: 'config' | 'markdown';
+  sourcePath?: string;
+}
+
+/**
  * Session state tracking acknowledged skills
  */
 export interface SessionState {
   acknowledgedSkills: string[];
+  acknowledgedCommands?: string[];
 }
 
 /**
@@ -75,5 +102,8 @@ export interface CacheEntry {
   result: {
     required: string[];
     suggested: string[];
+    requiredCommands?: string[];
+    suggestedCommands?: string[];
+    commandScores?: Record<string, number>;
   };
 }

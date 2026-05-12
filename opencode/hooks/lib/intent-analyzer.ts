@@ -14,8 +14,14 @@ import { SHORT_PROMPT_WORD_THRESHOLD, DEBUG_ENABLED } from './constants.js';
 import { readCache, writeCache } from './cache-manager.js';
 import { callAIForIntentAnalysis } from './ai-client.js';
 import { matchSkillsByKeywords } from './keyword-matcher.js';
-import { categorizeSkills, formatDebugOutput, buildAnalysisResult } from './intent-scorer.js';
-import type { AnalysisResult, SkillRule } from './types.js';
+import { debugLog } from './debug-logger.js';
+import {
+  categorizeSkills,
+  categorizeCommands,
+  formatDebugOutput,
+  buildAnalysisResult,
+} from './intent-scorer.js';
+import type { AnalysisResult, CommandRule, SkillRule } from './types.js';
 
 // Re-export types for backward compatibility
 export type { SkillConfidence, IntentAnalysis, AnalysisResult } from './types.js';
@@ -143,6 +149,55 @@ function selectCandidateSkills(
   return Object.fromEntries(scored.map(({ skillName, skillRule }) => [skillName, skillRule]));
 }
 
+function buildCommandMetadataFingerprint(commands: Record<string, CommandRule>): string {
+  const metadata = Object.entries(commands)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, rule]) => ({
+      name,
+      description: rule.description || '',
+      agent: rule.agent || '',
+      source: rule.source || '',
+      sourcePath: rule.sourcePath || '',
+      subtask: Boolean(rule.subtask),
+      model: rule.model || '',
+    }));
+  return JSON.stringify(metadata);
+}
+
+function buildCommandFallback(
+  prompt: string,
+  availableCommands: Record<string, CommandRule>
+): { requiredCommands: string[]; suggestedCommands: string[]; commandScores: Record<string, number> } {
+  const promptTokens = new Set(getPromptTokens(prompt));
+  const suggestedCommands: string[] = [];
+
+  for (const [commandName, commandRule] of Object.entries(availableCommands)) {
+    const searchable = `${commandName} ${commandRule.description || ''} ${commandRule.agent || ''} ${commandRule.source || ''}`.toLowerCase();
+    const tokens = searchable
+      .split(/[^a-z0-9]+/g)
+      .map((token) => token.replace(/s$/, ''))
+      .filter((token) => token.length >= 3);
+
+    const matchesByName =
+      prompt.toLowerCase().includes(commandName.toLowerCase()) ||
+      commandName
+        .toLowerCase()
+        .split(/[-._\s]+/g)
+        .some((token) => token.length >= 3 && promptTokens.has(token));
+    const matchesByKeywords = tokens.some((token) => promptTokens.has(token));
+
+    if (matchesByName || matchesByKeywords) {
+      suggestedCommands.push(commandName);
+    }
+  }
+
+  return {
+    requiredCommands: [],
+    suggestedCommands: Array.from(new Set(suggestedCommands)),
+    commandScores: {},
+  };
+}
+
 /**
  * Analyzes user intent using AI to determine relevant skills
  *
@@ -160,28 +215,38 @@ function selectCandidateSkills(
  */
 export async function analyzeIntent(
   prompt: string,
-  availableSkills: Record<string, SkillRule>
+  availableSkills: Record<string, SkillRule>,
+  availableCommands: Record<string, CommandRule> = {}
 ): Promise<AnalysisResult> {
   // Skip AI analysis for short prompts (saves API calls)
   const wordCount = prompt.trim().split(/\s+/).length;
   if (wordCount <= SHORT_PROMPT_WORD_THRESHOLD) {
-    return matchSkillsByKeywords(prompt, availableSkills);
+    const skillFallback = matchSkillsByKeywords(prompt, availableSkills);
+    return {
+      ...skillFallback,
+      ...buildCommandFallback(prompt, availableCommands),
+    };
   }
 
   const candidateSkills = selectCandidateSkills(prompt, availableSkills);
   const candidateSkillNames = new Set(Object.keys(candidateSkills));
+  const candidateCommandNames = new Set(Object.keys(availableCommands));
 
-  if (candidateSkillNames.size === 0) {
+  if (candidateSkillNames.size === 0 && candidateCommandNames.size === 0) {
     return { required: [], suggested: [] };
   }
 
-  // Check cache first - include candidate skills hash to invalidate when definitions change
+  // Check cache first - include candidate skills/commands hash to invalidate when definitions change
   const skillsHash = createHash('md5')
     .update(JSON.stringify(candidateSkills))
     .digest('hex')
     .substring(0, 8);
+  const commandsHash = createHash('md5')
+    .update(buildCommandMetadataFingerprint(availableCommands))
+    .digest('hex')
+    .substring(0, 8);
   const cacheKey = createHash('md5')
-    .update(`candidate-v2:${prompt}:${skillsHash}`)
+    .update(`candidate-v3:${prompt}:${skillsHash}:${commandsHash}`)
     .digest('hex');
 
   const cached = readCache(cacheKey);
@@ -191,7 +256,7 @@ export async function analyzeIntent(
 
   // Call AI provider
   try {
-    const analysis = await callAIForIntentAnalysis(prompt, candidateSkills);
+    const analysis = await callAIForIntentAnalysis(prompt, candidateSkills, availableCommands);
 
     // Debug logging
     if (DEBUG_ENABLED) {
@@ -200,8 +265,15 @@ export async function analyzeIntent(
 
     // Categorize by confidence thresholds
     const categorized = categorizeSkills(analysis);
+    const categorizedCommands = categorizeCommands(analysis);
     categorized.required = categorized.required.filter((skillName) => candidateSkillNames.has(skillName));
     categorized.suggested = categorized.suggested.filter((skillName) => candidateSkillNames.has(skillName));
+    categorizedCommands.required = categorizedCommands.required.filter((commandName) =>
+      candidateCommandNames.has(commandName)
+    );
+    categorizedCommands.suggested = categorizedCommands.suggested.filter((commandName) =>
+      candidateCommandNames.has(commandName)
+    );
 
     if (/\bapi\b|\bendpoint\b/i.test(prompt) && candidateSkillNames.has('api-design')) {
       categorized.required.push('api-design');
@@ -222,6 +294,20 @@ export async function analyzeIntent(
       analysis,
       DEBUG_ENABLED
     );
+    result.requiredCommands = Array.from(new Set(categorizedCommands.required));
+    result.suggestedCommands = Array.from(
+      new Set(
+        categorizedCommands.suggested.filter(
+          (commandName) => !result.requiredCommands!.includes(commandName)
+        )
+      )
+    );
+    result.commandScores = {};
+    for (const command of analysis.commands || []) {
+      if (candidateCommandNames.has(command.name)) {
+        result.commandScores[command.name] = command.confidence;
+      }
+    }
 
     // Guarantee guardrail skills are included even on long prompts where AI
     // might under-score them. Keyword matcher only returns guardrail skills
@@ -233,10 +319,25 @@ export async function analyzeIntent(
       }
     }
 
-    writeCache(cacheKey, { required: result.required, suggested: result.suggested });
+    writeCache(cacheKey, {
+      required: result.required,
+      suggested: result.suggested,
+      requiredCommands: result.requiredCommands,
+      suggestedCommands: result.suggestedCommands,
+      commandScores: result.commandScores,
+    });
     return result;
   } catch (error) {
+    debugLog(
+      `intent-analyzer: AI analysis failed, using fallback. reason=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     console.warn('Intent analysis failed, falling back to keyword matching:', error);
-    return matchSkillsByKeywords(prompt, availableSkills);
+    const skillFallback = matchSkillsByKeywords(prompt, availableSkills);
+    return {
+      ...skillFallback,
+      ...buildCommandFallback(prompt, availableCommands),
+    };
   }
 }

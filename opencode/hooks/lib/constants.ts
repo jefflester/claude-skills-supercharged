@@ -114,12 +114,20 @@ export const CONFIDENCE_THRESHOLD = parseFloat(
   process.env.SKILL_CONFIDENCE_THRESHOLD || '0.65'
 );
 export const SUGGESTED_THRESHOLD = parseFloat(process.env.SKILL_SUGGESTED_THRESHOLD || '0.50');
+export const COMMAND_CONFIDENCE_THRESHOLD = parseFloat(
+  process.env.COMMAND_CONFIDENCE_THRESHOLD || '0.90'
+);
+export const COMMAND_SUGGESTED_THRESHOLD = parseFloat(
+  process.env.COMMAND_SUGGESTED_THRESHOLD || '0.70'
+);
 
 // Skill injection limits to prevent context overload
 // Standard limit is 5 skills to allow broader prompt-time coverage.
 // Affinity skills are auto-injected free of slot cost (don't count toward limit)
 export const MAX_REQUIRED_SKILLS = 5; // Maximum critical skills to auto-inject
 export const MAX_SUGGESTED_SKILLS = 5; // Maximum recommended skills to suggest
+export const MAX_REQUIRED_COMMANDS = 5;
+export const MAX_SUGGESTED_COMMANDS = 5;
 
 // Short prompts use keyword matching instead of AI analysis
 // Saves API costs and latency for simple prompts where intent is unclear

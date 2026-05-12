@@ -10,6 +10,10 @@ import {
   SUGGESTED_THRESHOLD,
   MAX_REQUIRED_SKILLS,
   MAX_SUGGESTED_SKILLS,
+  COMMAND_CONFIDENCE_THRESHOLD,
+  COMMAND_SUGGESTED_THRESHOLD,
+  MAX_REQUIRED_COMMANDS,
+  MAX_SUGGESTED_COMMANDS,
 } from './constants.js';
 import type { IntentAnalysis, AnalysisResult } from './types.js';
 
@@ -39,6 +43,33 @@ export function categorizeSkills(analysis: IntentAnalysis): AnalysisResult {
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, MAX_SUGGESTED_SKILLS)
     .map((s) => s.name);
+
+  return { required, suggested };
+}
+
+/**
+ * Categorize commands by confidence thresholds
+ */
+export function categorizeCommands(analysis: IntentAnalysis): AnalysisResult {
+  if (!Array.isArray(analysis.commands)) {
+    return { required: [], suggested: [] };
+  }
+
+  const required = analysis.commands
+    .filter((c) => c.confidence >= COMMAND_CONFIDENCE_THRESHOLD)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, MAX_REQUIRED_COMMANDS)
+    .map((c) => c.name);
+
+  const suggested = analysis.commands
+    .filter(
+      (c) =>
+        c.confidence >= COMMAND_SUGGESTED_THRESHOLD &&
+        c.confidence < COMMAND_CONFIDENCE_THRESHOLD
+    )
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, MAX_SUGGESTED_COMMANDS)
+    .map((c) => c.name);
 
   return { required, suggested };
 }

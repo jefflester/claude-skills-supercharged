@@ -8,7 +8,9 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import type { SessionState } from './types.js';
+import { debugLog } from './debug-logger.js';
 
 /**
  * Extended session state with metadata
@@ -16,7 +18,104 @@ import type { SessionState } from './types.js';
 interface ExtendedSessionState extends SessionState {
   timestamp: number;
   injectedSkills: string[];
+  acknowledgedCommands?: string[];
+  injectedCommands?: string[];
   injectionTimestamp: number;
+}
+
+interface AcknowledgedState {
+  acknowledgedSkills: string[];
+  acknowledgedCommands: string[];
+}
+
+function sanitizeStateId(stateId: string): string {
+  return stateId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+}
+
+function hashStateId(stateId: string): string {
+  return createHash('sha256').update(stateId).digest('hex').slice(0, 16);
+}
+
+export function getSessionStateFilename(stateId: string): string {
+  return `${sanitizeStateId(stateId)}-${hashStateId(stateId)}-skills-suggested.json`;
+}
+
+export function getSessionStatePath(stateDir: string, stateId: string): string {
+  return join(stateDir, getSessionStateFilename(stateId));
+}
+
+function getLegacySessionStatePath(stateDir: string, stateId: string): string {
+  return join(stateDir, `${stateId}-skills-suggested.json`);
+}
+
+function isSafeLegacyStateId(stateId: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(stateId);
+}
+
+export function getSafeLegacySessionStatePath(
+  stateDir: string,
+  stateId: string
+): string | null {
+  if (!isSafeLegacyStateId(stateId)) {
+    return null;
+  }
+
+  return getLegacySessionStatePath(stateDir, stateId);
+}
+
+function resolveStateFilePath(stateDir: string, stateId: string): string {
+  const stateFile = getSessionStatePath(stateDir, stateId);
+  if (existsSync(stateFile)) {
+    return stateFile;
+  }
+
+  if (isSafeLegacyStateId(stateId)) {
+    return getLegacySessionStatePath(stateDir, stateId);
+  }
+
+  return stateFile;
+}
+
+function readSessionState(stateDir: string, stateId: string): ExtendedSessionState | null {
+  const targetFile = resolveStateFilePath(stateDir, stateId);
+  if (!existsSync(targetFile)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(readFileSync(targetFile, 'utf-8')) as ExtendedSessionState;
+  } catch (error) {
+    debugLog(
+      `skill-state-manager: failed to parse session state ${targetFile}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return null;
+  }
+}
+
+function normalizeStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    debugLog(`skill-state-manager: invalid state field ${fieldName}, expected array`);
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+export function readAcknowledgedState(stateDir: string, stateId: string): AcknowledgedState {
+  const state = readSessionState(stateDir, stateId);
+  if (!state) {
+    return { acknowledgedSkills: [], acknowledgedCommands: [] };
+  }
+
+  return {
+    acknowledgedSkills: normalizeStringArray(state.acknowledgedSkills, 'acknowledgedSkills'),
+    acknowledgedCommands: normalizeStringArray(
+      state.acknowledgedCommands,
+      'acknowledgedCommands'
+    ),
+  };
 }
 
 /**
@@ -30,19 +129,14 @@ interface ExtendedSessionState extends SessionState {
  * @returns Array of acknowledged skill names
  */
 export function readAcknowledgedSkills(stateDir: string, stateId: string): string[] {
-  const stateFile = join(stateDir, `${stateId}-skills-suggested.json`);
+  return readAcknowledgedState(stateDir, stateId).acknowledgedSkills;
+}
 
-  if (!existsSync(stateFile)) {
-    return [];
-  }
-
-  try {
-    const existing: ExtendedSessionState = JSON.parse(readFileSync(stateFile, 'utf-8'));
-    return existing.acknowledgedSkills || [];
-  } catch {
-    // Invalid JSON, start fresh
-    return [];
-  }
+/**
+ * Read acknowledged commands from session state file
+ */
+export function readAcknowledgedCommands(stateDir: string, stateId: string): string[] {
+  return readAcknowledgedState(stateDir, stateId).acknowledgedCommands;
 }
 
 /**
@@ -60,19 +154,23 @@ export function writeSessionState(
   stateDir: string,
   stateId: string,
   acknowledgedSkills: string[],
-  injectedSkills: string[]
+  injectedSkills: string[],
+  acknowledgedCommands: string[] = [],
+  injectedCommands: string[] = []
 ): void {
   try {
     // Ensure state directory exists
     mkdirSync(stateDir, { recursive: true });
 
-    const stateFile = join(stateDir, `${stateId}-skills-suggested.json`);
+    const stateFile = getSessionStatePath(stateDir, stateId);
     const tempFile = `${stateFile}.tmp`;
 
     const stateData: ExtendedSessionState = {
       timestamp: Date.now(),
       acknowledgedSkills,
       injectedSkills,
+      acknowledgedCommands,
+      injectedCommands,
       injectionTimestamp: Date.now(),
     };
 
@@ -91,6 +189,10 @@ export function writeSessionState(
     }
   } catch (err) {
     // Don't fail the hook if state writing fails
-    console.error('Warning: Failed to write session state:', err);
+    debugLog(
+      `skill-state-manager: failed to write session state for ${stateId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
   }
 }

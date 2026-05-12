@@ -7,8 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { parseArgs } from 'util';
 import { debugLog } from '../hooks/lib/debug-logger.js';
 import { buildSkillRulesFromSkills, SKILL_RULES_PATH, SKILLS_DIR } from '../hooks/lib/skill-discovery.js';
+import { discoverCommands, resolveCommandDiscoveryOptions } from '../hooks/lib/command-discovery.js';
+import { filterCommandReferences } from '../hooks/lib/command-filtration.js';
 import type {
   AnalysisResult,
+  CommandRule,
   SkillRule,
   SkillRulesConfig,
 } from '../hooks/lib/types.js';
@@ -38,13 +41,21 @@ interface SkillSelectionResult {
   scores: Record<string, number>;
   labels: Record<string, SelectionLabel>;
   promoted: string[];
+  commands: string[];
+  suggestedCommands: string[];
+  alreadyLoadedCommands: string[];
+  commandScores: Record<string, number>;
   sessionId?: string;
   threshold: number;
   provider?: string;
 }
 
 interface RuntimeModules {
-  analyzeIntent: (prompt: string, skills: Record<string, SkillRule>) => Promise<AnalysisResult>;
+  analyzeIntent: (
+    prompt: string,
+    skills: Record<string, SkillRule>,
+    commands?: Record<string, CommandRule>
+  ) => Promise<AnalysisResult>;
   resolveSkillDependencies: (skills: string[], skillRules: Record<string, SkillRule>) => string[];
   filterAndPromoteSkills: (
     requiredSkills: string[],
@@ -57,8 +68,18 @@ interface RuntimeModules {
     acknowledged: string[],
     skillRules: Record<string, SkillRule>
   ) => string[];
-  readAcknowledgedSkills: (stateDir: string, stateId: string) => string[];
-  writeSessionState: (stateDir: string, stateId: string, acknowledgedSkills: string[], injectedSkills: string[]) => void;
+  readAcknowledgedState: (
+    stateDir: string,
+    stateId: string
+  ) => { acknowledgedSkills: string[]; acknowledgedCommands: string[] };
+  writeSessionState: (
+    stateDir: string,
+    stateId: string,
+    acknowledgedSkills: string[],
+    injectedSkills: string[],
+    acknowledgedCommands?: string[],
+    injectedCommands?: string[]
+  ) => void;
   debugLog: (message: string) => void;
 }
 
@@ -152,7 +173,9 @@ async function loadSkillRules(): Promise<SkillRulesConfig> {
 }
 
 function prepareRuntimeEnvironment(provider?: string): void {
-  process.env.OPENCODE_SKILLS_DEBUG = '1';
+  if (process.env.OPENCODE_SKILLS_DEBUG === undefined) {
+    process.env.OPENCODE_SKILLS_DEBUG = '0';
+  }
 
   if (provider && provider.length > 0) {
     process.env.OPENCODE_SKILLS_PROVIDER = provider;
@@ -184,7 +207,7 @@ async function loadRuntimeModules(): Promise<RuntimeModules> {
       resolveSkillDependencies: skillResolutionModule.resolveSkillDependencies,
       filterAndPromoteSkills: skillFiltrationModule.filterAndPromoteSkills,
       findAffinityInjections: skillFiltrationModule.findAffinityInjections,
-      readAcknowledgedSkills: skillStateManagerModule.readAcknowledgedSkills,
+      readAcknowledgedState: skillStateManagerModule.readAcknowledgedState,
       writeSessionState: skillStateManagerModule.writeSessionState,
       debugLog: loggerModule.debugLog,
     };
@@ -234,6 +257,17 @@ function parseSuggestedThreshold(): number {
   return parseNumberOption(process.env.SKILL_SUGGESTED_THRESHOLD, 0.5);
 }
 
+function parseCommandThreshold(): number {
+  return parseNumberOption(process.env.COMMAND_CONFIDENCE_THRESHOLD, 0.9);
+}
+
+function parseCommandSuggestedThreshold(requiredThreshold: number): number {
+  return Math.min(
+    parseNumberOption(process.env.COMMAND_SUGGESTED_THRESHOLD, 0.7),
+    requiredThreshold
+  );
+}
+
 function buildConfidenceBuckets(
   analysis: AnalysisResult,
   threshold: number
@@ -278,6 +312,50 @@ function buildConfidenceBuckets(
   };
 }
 
+function buildCommandConfidenceBuckets(
+  analysis: AnalysisResult,
+  threshold: number
+): { required: string[]; suggested: string[]; scores: Record<string, number> } {
+  const scoreMap = analysis.commandScores ?? {};
+  const candidateCommands = new Set<string>([
+    ...(analysis.requiredCommands ?? []),
+    ...(analysis.suggestedCommands ?? []),
+    ...Object.keys(scoreMap),
+  ]);
+
+  const suggestedFloor = parseCommandSuggestedThreshold(threshold);
+  const requiredCommands: string[] = [];
+  const suggestedCommands: string[] = [];
+
+  for (const commandName of candidateCommands) {
+    const confidence = scoreMap[commandName];
+
+    if (typeof confidence === 'number') {
+      if (confidence >= threshold) {
+        requiredCommands.push(commandName);
+      } else if (confidence >= suggestedFloor) {
+        suggestedCommands.push(commandName);
+      }
+      continue;
+    }
+
+    if ((analysis.requiredCommands ?? []).includes(commandName)) {
+      requiredCommands.push(commandName);
+      continue;
+    }
+
+    if ((analysis.suggestedCommands ?? []).includes(commandName)) {
+      suggestedCommands.push(commandName);
+    }
+  }
+
+  return {
+    required: Array.from(new Set(requiredCommands)),
+    suggested: Array.from(new Set(suggestedCommands)),
+    scores: scoreMap,
+  };
+}
+
 function getSelectionLabel(
   skillName: string,
   requiredSkills: Set<string>,
@@ -303,26 +381,50 @@ export async function selectSkills(
   prompt: string,
   options: CliOptions = { debug: false, format: 'text' }
 ): Promise<SkillSelectionResult> {
+  if (options.debug === true) {
+    process.env.OPENCODE_SKILLS_DEBUG = '1';
+  } else if (process.env.OPENCODE_SKILLS_DEBUG === undefined) {
+    process.env.OPENCODE_SKILLS_DEBUG = '0';
+  }
   prepareRuntimeEnvironment(options.provider);
 
   const projectDirectory = getProjectDirectory();
   const pluginDirectory = getPluginDirectory();
   const stateDirectory = await resolveStateDirectory(pluginDirectory, projectDirectory);
   const rules = await loadSkillRules();
+  const commandRules = discoverCommands(resolveCommandDiscoveryOptions(projectDirectory));
   const modules = await loadRuntimeModules();
   const quietMode = options.debug !== true;
-  const acknowledgedSkills = options.sessionId
+  const acknowledgedState = options.sessionId
     ? await withConsoleSuppressed(quietMode, () =>
-        Promise.resolve(modules.readAcknowledgedSkills(stateDirectory, options.sessionId!))
+        Promise.resolve(modules.readAcknowledgedState(stateDirectory, options.sessionId!))
       )
-    : [];
+    : { acknowledgedSkills: [], acknowledgedCommands: [] };
+  const acknowledgedSkills = acknowledgedState.acknowledgedSkills;
+  const acknowledgedCommands = acknowledgedState.acknowledgedCommands;
 
   const analysis = await withConsoleSuppressed(quietMode, () =>
-    modules.analyzeIntent(prompt, rules.skills)
+    modules.analyzeIntent(prompt, rules.skills, commandRules)
   );
 
   const threshold = parseSelectionThreshold(options.threshold);
   const confidenceBuckets = buildConfidenceBuckets(analysis, threshold);
+  const commandConfidenceBuckets = buildCommandConfidenceBuckets(
+    analysis,
+    parseCommandThreshold()
+  );
+  const commandFiltration = filterCommandReferences(
+    commandConfidenceBuckets.required,
+    commandConfidenceBuckets.suggested,
+    acknowledgedCommands
+  );
+  const alreadyLoadedCommands = Array.from(
+    new Set(
+      [...commandConfidenceBuckets.required, ...commandConfidenceBuckets.suggested].filter((name) =>
+        acknowledgedCommands.includes(name)
+      )
+    )
+  );
   const filtration = await withConsoleSuppressed(quietMode, () =>
     Promise.resolve(
       modules.filterAndPromoteSkills(
@@ -378,6 +480,10 @@ export async function selectSkills(
     scores: selectionScores,
     labels,
     promoted: filtration.promoted,
+    commands: commandFiltration.toInject,
+    suggestedCommands: commandFiltration.remainingSuggested,
+    alreadyLoadedCommands,
+    commandScores: commandConfidenceBuckets.scores,
     sessionId: options.sessionId,
     threshold,
     provider: options.provider,
@@ -385,7 +491,15 @@ export async function selectSkills(
 
   if (options.sessionId) {
     const injectedSkills = [...baseSkills, ...affinitySkills];
-    modules.writeSessionState(stateDirectory, options.sessionId, [...acknowledgedSkills, ...injectedSkills], injectedSkills);
+    const injectedCommands = commandFiltration.toInject;
+    modules.writeSessionState(
+      stateDirectory,
+      options.sessionId,
+      [...acknowledgedSkills, ...injectedSkills],
+      injectedSkills,
+      [...acknowledgedCommands, ...injectedCommands],
+      injectedCommands
+    );
   }
 
   return selection;
@@ -426,6 +540,38 @@ function formatTextOutput(selection: SkillSelectionResult): string {
     }
   }
 
+  lines.push('');
+  lines.push('Required commands:');
+  if (selection.commands.length === 0) {
+    lines.push('  (none)');
+  } else {
+    for (const commandName of selection.commands) {
+      const score = selection.commandScores[commandName];
+      const scoreText = typeof score === 'number' ? ` (${score.toFixed(2)})` : '';
+      lines.push(`  → /${commandName}${scoreText}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Suggested commands:');
+  if (selection.suggestedCommands.length === 0) {
+    lines.push('  (none)');
+  } else {
+    for (const commandName of selection.suggestedCommands) {
+      const score = selection.commandScores[commandName];
+      const scoreText = typeof score === 'number' ? ` (${score.toFixed(2)})` : '';
+      lines.push(`  → /${commandName}${scoreText}`);
+    }
+  }
+
+  if (selection.alreadyLoadedCommands.length > 0) {
+    lines.push('');
+    lines.push('Already loaded commands:');
+    for (const commandName of selection.alreadyLoadedCommands) {
+      lines.push(`  → /${commandName}`);
+    }
+  }
+
   const injectedSkills = [...selection.selected, ...selection.affinity];
   lines.push('');
   lines.push(`Injected: ${injectedSkills.join(', ')}`);
@@ -447,6 +593,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         scores: selection.scores,
         labels: selection.labels,
         promoted: selection.promoted,
+        commands: selection.commands,
+        suggestedCommands: selection.suggestedCommands,
+        alreadyLoadedCommands: selection.alreadyLoadedCommands,
+        commandScores: selection.commandScores,
         sessionId: selection.sessionId,
         threshold: selection.threshold,
         provider: selection.provider,
