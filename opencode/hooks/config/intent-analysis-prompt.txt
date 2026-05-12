@@ -1,0 +1,80 @@
+Analyze this user prompt and determine which domain skills are relevant for the PRIMARY task.
+
+User prompt: "{{USER_PROMPT}}"
+
+Available skills:
+{{SKILL_DESCRIPTIONS}}
+
+IMPORTANT SCORING GUIDANCE:
+Confidence Thresholds:
+- > 0.65: REQUIRED (auto-injected as critical skill)
+- 0.50 to 0.65: SUGGESTED (recommended but not auto-injected)
+- < 0.50: IGNORED (not considered relevant)
+
+Scoring examples (not separate tiers):
+- 0.85-0.95: User is DIRECTLY working on this domain (editing code, implementing features)
+- 0.72-0.75: User needs this domain knowledge to complete their primary task
+- 0.58-0.65: Domain is related and helpful but not strictly essential
+- 0.42-0.50: Domain mentioned in passing or as background context
+- 0.0-0.30: Not relevant to primary task
+
+EXAMPLES OF WHAT NOT TO SUGGEST:
+- "Investigate the code" → Do NOT suggest troubleshooting (researching code ≠ debugging runtime issues)
+- "Read the logs" → Do NOT suggest troubleshooting if examining config/code (not live debugging)
+- "Check the test file" → Do NOT suggest testing-strategy unless writing/running tests
+- "Look at component code" → Do NOT suggest code-patterns unless modifying components
+- "How does X work?" → Research/understanding ≠ implementing features
+
+CRITICAL SELECTION RULES:
+- You MUST select ONLY the TOP 2 most relevant skills for the primary task (confidence > 0.65)
+- Be extremely selective - prioritize the 2 skills most essential to completing the main action
+- Additional related skills should be marked 0.5-0.7 (suggested, not critical)
+- If no skills are truly essential, return 0 critical skills
+- Focus on MAIN ACTION, not tangential mentions
+
+MULTI-DOMAIN WORK DETECTION:
+- If the prompt involves ACTIVE work across multiple domains, score both high (0.75-0.90)
+  Examples:
+  * "Modify the frontend component's API integration" → frontend-framework (0.90) + api-protocols (0.85)
+  * "Write tests for the integration layer" → testing-strategy (0.90) + system-architecture (0.85)
+  * "Fix the CI workflow that builds components" → deployment-automation (0.90) + frontend-framework (0.75)
+
+- If the prompt is META-LEVEL (testing/checking/understanding the system itself), deprioritize:
+  Examples:
+  * "Skill system check: frontend, backend, testing" → Likely troubleshooting/research, not active work
+  * "How does the component system work?" → Research, not implementation (score 0.50-0.65)
+  * "Check if the integration tools are working" → troubleshooting (0.75), not integration-tools (0.55)
+
+- KEYWORD SOUP (listing many domains without clear action) should score lower (0.50-0.65):
+  Examples:
+  * "Review: frontend, backend, testing, deployment, database" → Ambiguous intent, likely research (all 0.50-0.60)
+  * Exception: If context suggests active work across domains, score higher
+
+SKILL-DEVELOPER DETECTION (Skills System Itself):
+- The skill-developer skill should score REQUIRED (> 0.65) for prompts about the SKILLS SYSTEM ITSELF
+- Questions about HOW the skills system works, HOW skills are loaded, or MODIFYING skill configuration
+  Examples of REQUIRED relevance (0.80-0.95):
+  * "How does the skills activation hook work?" → skill-developer (0.92)
+  * "Explain the intent analysis prompt" → skill-developer (0.88)
+  * "Why isn't skill X loading?" → skill-developer (0.85)
+  * "How are skills detected and injected?" → skill-developer (0.90)
+  * "Modify skill-rules.json" → skill-developer (0.88)
+  * "Add a new skill trigger pattern" → skill-developer (0.87)
+  * "Debug the UserPromptSubmit hook" → skill-developer (0.82)
+  * "Explain how intent patterns work" → skill-developer (0.84)
+
+- Do NOT score skill-developer high (> 0.65) for:
+  * Using existing domain skills (frontend-framework, testing-strategy, etc.) → (0.15-0.35)
+  * General questions about components, integration, testing, etc. → Use domain-specific skills instead
+  * Working with actual code (not skill system code) → (0.10-0.30)
+
+Return JSON with confidence scores (0.0-1.0) for each skill's relevance to the PRIMARY task intent.
+Only include skills with confidence >= 0.50 (SUGGESTED threshold or higher).
+
+Response format:
+{
+  "primary_intent": "brief description of main task",
+  "skills": [
+    {"name": "skill-name", "confidence": 0.95, "reason": "why this skill is relevant"}
+  ]
+}

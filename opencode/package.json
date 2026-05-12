@@ -1,0 +1,26 @@
+{
+  "name": "opencode-dynamic-skills",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode dynamic skills injector plugin",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@vitest/coverage-v8": "^4.1.5",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.5"
+  },
+  "optionalDependencies": {
+    "openai": "^4.0.0"
+  }
+}

@@ -34,6 +34,10 @@ coverage/
 .claude/hooks/state/
 .cache/
 .claude/hooks/skill-injection-debug.log
+state/
+opencode/state/
+opencode/.opencode/
+.swarm/
 
 # Build artifacts
 *.tgz
