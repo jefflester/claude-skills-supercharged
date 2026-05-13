@@ -30,6 +30,7 @@ const commands: Record<string, CommandRule> = {
   'quality-gate': {
     description: 'Run the ECC quality gate',
     template: 'Quality body',
+    promptTriggers: { keywords: ['quality', 'gate'] },
     source: 'markdown',
   },
   'code-review': {
@@ -45,6 +46,12 @@ const commands: Record<string, CommandRule> = {
   'prp.plan': {
     description: 'Create PRP plan',
     template: 'Unused in metadata fallback',
+    promptTriggers: { keywords: ['prp', 'plan'] },
+    source: 'markdown',
+  },
+  unrelated: {
+    description: 'Publish a social media post',
+    template: 'Unused unrelated command',
     source: 'markdown',
   },
 };
@@ -78,6 +85,13 @@ describe('command-aware intent analyzer', () => {
       'quality-gate': 0.93,
       'code-review': 0.78,
     });
+    expect(mocks.callAIForIntentAnalysis).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      expect.not.objectContaining({
+        unrelated: expect.any(Object),
+      })
+    );
     expect(mocks.writeCache).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
@@ -103,5 +117,42 @@ describe('command-aware intent analyzer', () => {
     expect(result.requiredCommands).toEqual([]);
     expect(result.suggestedCommands).toEqual(['quality-gate', 'prp.plan']);
     expect(result.suggestedCommands).not.toContain('template-only');
+  });
+
+  it('uses command prompt triggers for AI candidate selection like skills', async () => {
+    mocks.callAIForIntentAnalysis.mockResolvedValue({
+      primary_intent: 'security implementation',
+      skills: [],
+      commands: [{ name: 'security', confidence: 0.91, reason: 'security workflow' }],
+    });
+
+    const result = await analyzeIntent(
+      'Generate a dependency security report for this implementation',
+      {},
+      {
+        security: {
+          description: 'Run comprehensive security review',
+          template: 'Security body',
+          promptTriggers: { keywords: ['security'] },
+          source: 'config',
+        },
+        docs: {
+          description: 'Write product documentation',
+          template: 'Docs body',
+          source: 'config',
+        },
+      }
+    );
+
+    expect(mocks.callAIForIntentAnalysis).toHaveBeenCalledWith(
+      expect.any(String),
+      {},
+      {
+        security: expect.objectContaining({
+          description: 'Run comprehensive security review',
+        }),
+      }
+    );
+    expect(result.requiredCommands).toEqual(['security']);
   });
 });

@@ -20,6 +20,11 @@ describe('command discovery', () => {
       'prp-plan',
       `---
 description: Create a PRP plan
+type: guardrail
+autoInject: true
+promptTriggers.keywords: prp, plan
+requiredCommands: verify, update-docs
+injectionOrder: 12
 agent: planner
 subtask: true
 model: openai/gpt-5.2
@@ -32,7 +37,12 @@ Create a detailed plan for $ARGUMENTS.
     );
 
     expect(rule).toMatchObject({
+      type: 'guardrail',
       description: 'Create a PRP plan',
+      autoInject: true,
+      requiredCommands: ['verify', 'update-docs'],
+      injectionOrder: 12,
+      promptTriggers: { keywords: ['prp', 'plan'] },
       agent: 'planner',
       subtask: true,
       model: 'openai/gpt-5.2',
@@ -82,6 +92,11 @@ Markdown body.`
           review: {
             template: 'Config body.',
             description: 'Config review',
+            type: 'guardrail',
+            autoInject: true,
+            requiredCommands: ['verify'],
+            injectionOrder: 20,
+            promptTriggers: { keywords: ['review', 'diff'] },
             agent: 'build',
           },
           tdd: {
@@ -95,7 +110,12 @@ Markdown body.`
 
     expect(discoverCommands({ configPath, commandsDirs: [commandsDir] })).toMatchObject({
       review: {
+        type: 'guardrail',
         description: 'Config review',
+        autoInject: true,
+        requiredCommands: ['verify'],
+        injectionOrder: 20,
+        promptTriggers: { keywords: ['review', 'diff'] },
         template: 'Config body.',
         source: 'config',
         agent: 'build',

@@ -199,18 +199,81 @@ function parseFrontmatter(markdown: string): {
   return { frontmatter, body: body.trim() };
 }
 
+function parseStringList(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const entries = value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    return entries.length > 0 ? entries : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const entries = value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    return entries.length > 0 ? entries : undefined;
+  }
+
+  return undefined;
+}
+
+function parseCommandType(value: unknown): 'guardrail' | 'domain' | undefined {
+  return value === 'guardrail' || value === 'domain' ? value : undefined;
+}
+
+function parseNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function parsePromptTriggerKeywords(source: Record<string, unknown>): string[] | undefined {
+  const promptTriggers = source.promptTriggers;
+  if (
+    typeof promptTriggers === 'object' &&
+    promptTriggers !== null &&
+    !Array.isArray(promptTriggers)
+  ) {
+    const keywords = parseStringList(
+      (promptTriggers as Record<string, unknown>).keywords
+    );
+    if (keywords) return keywords;
+  }
+
+  return (
+    parseStringList(source['promptTriggers.keywords']) ||
+    parseStringList(source.keywords)
+  );
+}
+
 export function buildCommandRuleFromMarkdown(
   commandName: string,
   markdown: string,
   sourcePath: string
 ): CommandRule {
   const { frontmatter, body } = parseFrontmatter(markdown);
+  const promptTriggerKeywords = parsePromptTriggerKeywords(frontmatter);
+
   return {
+    type: parseCommandType(frontmatter.type),
     description:
       typeof frontmatter.description === 'string'
         ? frontmatter.description
         : `Command ${commandName}`,
     template: body,
+    autoInject: typeof frontmatter.autoInject === 'boolean' ? frontmatter.autoInject : undefined,
+    requiredCommands: parseStringList(frontmatter.requiredCommands),
+    injectionOrder: parseNumber(frontmatter.injectionOrder),
+    promptTriggers: promptTriggerKeywords ? { keywords: promptTriggerKeywords } : undefined,
     agent: typeof frontmatter.agent === 'string' ? frontmatter.agent : undefined,
     subtask: typeof frontmatter.subtask === 'boolean' ? frontmatter.subtask : undefined,
     model: typeof frontmatter.model === 'string' ? frontmatter.model : undefined,
@@ -308,12 +371,18 @@ function discoverCommandsFromConfig(configPath: string): Record<string, CommandR
         continue;
       }
 
+      const promptTriggerKeywords = parsePromptTriggerKeywords(config);
       discovered[commandName] = {
+        type: parseCommandType(config.type),
         description:
           typeof config.description === 'string'
             ? config.description
             : `Command ${commandName}`,
         template,
+        autoInject: typeof config.autoInject === 'boolean' ? config.autoInject : undefined,
+        requiredCommands: parseStringList(config.requiredCommands),
+        injectionOrder: parseNumber(config.injectionOrder),
+        promptTriggers: promptTriggerKeywords ? { keywords: promptTriggerKeywords } : undefined,
         agent: typeof config.agent === 'string' ? config.agent : undefined,
         subtask: typeof config.subtask === 'boolean' ? config.subtask : undefined,
         model: typeof config.model === 'string' ? config.model : undefined,

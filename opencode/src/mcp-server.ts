@@ -465,7 +465,8 @@ export async function selectSkillsTool(input: SelectSkillsInput): Promise<Select
   const commandFiltration = filterCommandReferences(
     commandConfidenceBuckets.required,
     commandConfidenceBuckets.suggested,
-    acknowledgedCommands
+    acknowledgedCommands,
+    commandRules
   );
   const alreadyLoadedCommands = Array.from(
     new Set(

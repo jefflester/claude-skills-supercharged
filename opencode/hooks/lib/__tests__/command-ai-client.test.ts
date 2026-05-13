@@ -48,12 +48,11 @@ describe('command-aware AI client', () => {
     ).toEqual([]);
   });
 
-  it('includes command names only in the prompt without command metadata or template previews', () => {
+  it('includes command names and descriptions in the prompt without command metadata or template previews', () => {
     const prompt = buildPrompt('Run checks', skills, commands);
 
     expect(prompt).toContain('Available commands');
-    expect(prompt).toContain('- quality-gate');
-    expect(prompt).not.toContain('Run the ECC quality gate.');
+    expect(prompt).toContain('- quality-gate: Run the ECC quality gate.');
     expect(prompt).not.toContain('Agent: build-error-resolver');
     expect(prompt).not.toContain('Source: markdown');
     expect(prompt).not.toContain('!npm test');

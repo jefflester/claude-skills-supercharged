@@ -108,7 +108,7 @@ describe('command hook behavior', () => {
     expect(joined).toContain('[$quality-gate](C:\\mock\\commands\\quality-gate.md)');
     expect(joined).toContain('[$code-review](C:\\mock\\commands\\code-review.md)');
     expect(joined).toContain('REQUIRED COMMANDS');
-    expect(joined).toContain('SUGGESTED COMMANDS');
+    expect(joined).not.toContain('SUGGESTED COMMANDS');
   });
 
   it('logs the formatted injected reference blocks in debug output', async () => {
@@ -148,8 +148,8 @@ describe('command hook behavior', () => {
 
     const rawState = await readFile(getSessionStatePath(join(pluginDirectory, 'state'), 's2'), 'utf-8');
     const state = JSON.parse(rawState);
-    expect(state.acknowledgedCommands).toEqual(['quality-gate']);
-    expect(state.injectedCommands).toEqual(['quality-gate']);
+    expect(state.acknowledgedCommands).toEqual(['quality-gate', 'code-review']);
+    expect(state.injectedCommands).toEqual(['quality-gate', 'code-review']);
   });
 
   it('does not reinject commands on a second transform call for the same session', async () => {

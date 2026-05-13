@@ -160,7 +160,10 @@ function buildCommandDescriptions(commands: Record<string, CommandRule>): string
       .trim();
 
   return Object.entries(commands)
-    .map(([commandName]) => `- ${sanitizeName(commandName)}`)
+    .map(([commandName, commandRule]) => {
+      const description = commandRule.description || 'No description provided.';
+      return `- ${sanitizeName(commandName)}: ${description}`;
+    })
     .join('\n');
 }
 

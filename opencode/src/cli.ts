@@ -416,7 +416,8 @@ export async function selectSkills(
   const commandFiltration = filterCommandReferences(
     commandConfidenceBuckets.required,
     commandConfidenceBuckets.suggested,
-    acknowledgedCommands
+    acknowledgedCommands,
+    commandRules
   );
   const alreadyLoadedCommands = Array.from(
     new Set(

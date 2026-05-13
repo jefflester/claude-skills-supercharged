@@ -77,8 +77,13 @@ export interface SkillRulesConfig {
  * Command rule configuration from OpenCode config/markdown
  */
 export interface CommandRule {
+  type?: 'guardrail' | 'domain';
   description?: string;
   template: string;
+  autoInject?: boolean;
+  requiredCommands?: string[];
+  injectionOrder?: number;
+  promptTriggers?: PromptTriggers;
   agent?: string;
   subtask?: boolean;
   model?: string;

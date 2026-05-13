@@ -149,12 +149,54 @@ function selectCandidateSkills(
   return Object.fromEntries(scored.map(({ skillName, skillRule }) => [skillName, skillRule]));
 }
 
+function commandRuleAsSkillRule(commandName: string, commandRule: CommandRule): SkillRule {
+  return {
+    type: commandRule.type || 'domain',
+    description: commandRule.description,
+    autoInject: commandRule.autoInject,
+    requiredSkills: commandRule.requiredCommands,
+    injectionOrder: commandRule.injectionOrder,
+    promptTriggers: commandRule.promptTriggers,
+  };
+}
+
+function selectCandidateCommands(
+  prompt: string,
+  availableCommands: Record<string, CommandRule>,
+  maxCandidates = 32
+): Record<string, CommandRule> {
+  const promptTokens = getPromptTokens(prompt);
+  const scored = Object.entries(availableCommands)
+    .map(([commandName, commandRule]) => ({
+      commandName,
+      commandRule,
+      score: scoreCandidateSkill(
+        prompt,
+        promptTokens,
+        commandName,
+        commandRuleAsSkillRule(commandName, commandRule)
+      ),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.commandName.localeCompare(b.commandName))
+    .slice(0, maxCandidates);
+
+  return Object.fromEntries(
+    scored.map(({ commandName, commandRule }) => [commandName, commandRule])
+  );
+}
+
 function buildCommandMetadataFingerprint(commands: Record<string, CommandRule>): string {
   const metadata = Object.entries(commands)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, rule]) => ({
       name,
       description: rule.description || '',
+      type: rule.type || '',
+      autoInject: Boolean(rule.autoInject),
+      requiredCommands: rule.requiredCommands || [],
+      injectionOrder: rule.injectionOrder || 0,
+      promptTriggers: rule.promptTriggers || {},
       agent: rule.agent || '',
       source: rule.source || '',
       sourcePath: rule.sourcePath || '',
@@ -168,34 +210,24 @@ function buildCommandFallback(
   prompt: string,
   availableCommands: Record<string, CommandRule>
 ): { requiredCommands: string[]; suggestedCommands: string[]; commandScores: Record<string, number> } {
-  const promptTokens = new Set(getPromptTokens(prompt));
-  const suggestedCommands: string[] = [];
-
-  for (const [commandName, commandRule] of Object.entries(availableCommands)) {
-    const searchable = `${commandName} ${commandRule.description || ''} ${commandRule.agent || ''} ${commandRule.source || ''}`.toLowerCase();
-    const tokens = searchable
-      .split(/[^a-z0-9]+/g)
-      .map((token) => token.replace(/s$/, ''))
-      .filter((token) => token.length >= 3);
-
-    const matchesByName =
-      prompt.toLowerCase().includes(commandName.toLowerCase()) ||
-      commandName
-        .toLowerCase()
-        .split(/[-._\s]+/g)
-        .some((token) => token.length >= 3 && promptTokens.has(token));
-    const matchesByKeywords = tokens.some((token) => promptTokens.has(token));
-
-    if (matchesByName || matchesByKeywords) {
-      suggestedCommands.push(commandName);
-    }
-  }
+  const commandRules = Object.fromEntries(
+    Object.entries(availableCommands).map(([commandName, commandRule]) => [
+      commandName,
+      commandRuleAsSkillRule(commandName, commandRule),
+    ])
+  );
+  const matched = matchSkillsByKeywords(prompt, commandRules);
 
   return {
-    requiredCommands: [],
-    suggestedCommands: Array.from(new Set(suggestedCommands)),
+    requiredCommands: matched.required,
+    suggestedCommands: matched.suggested,
     commandScores: {},
   };
+}
+
+function matchesCommandTopic(commandName: string, commandRule: CommandRule, topicPattern: RegExp): boolean {
+  const searchable = `${commandName} ${commandRule.description || ''}`;
+  return topicPattern.test(searchable);
 }
 
 /**
@@ -230,7 +262,8 @@ export async function analyzeIntent(
 
   const candidateSkills = selectCandidateSkills(prompt, availableSkills);
   const candidateSkillNames = new Set(Object.keys(candidateSkills));
-  const candidateCommandNames = new Set(Object.keys(availableCommands));
+  const candidateCommands = selectCandidateCommands(prompt, availableCommands);
+  const candidateCommandNames = new Set(Object.keys(candidateCommands));
 
   if (candidateSkillNames.size === 0 && candidateCommandNames.size === 0) {
     return { required: [], suggested: [] };
@@ -242,11 +275,11 @@ export async function analyzeIntent(
     .digest('hex')
     .substring(0, 8);
   const commandsHash = createHash('md5')
-    .update(buildCommandMetadataFingerprint(availableCommands))
+    .update(buildCommandMetadataFingerprint(candidateCommands))
     .digest('hex')
     .substring(0, 8);
   const cacheKey = createHash('md5')
-    .update(`candidate-v3:${prompt}:${skillsHash}:${commandsHash}`)
+    .update(`candidate-v4:${prompt}:${skillsHash}:${commandsHash}`)
     .digest('hex');
 
   const cached = readCache(cacheKey);
@@ -256,7 +289,7 @@ export async function analyzeIntent(
 
   // Call AI provider
   try {
-    const analysis = await callAIForIntentAnalysis(prompt, candidateSkills, availableCommands);
+    const analysis = await callAIForIntentAnalysis(prompt, candidateSkills, candidateCommands);
 
     // Debug logging
     if (DEBUG_ENABLED) {
@@ -283,9 +316,33 @@ export async function analyzeIntent(
       categorized.required.push('security-review');
     }
 
+    if (/\bapi\b|\bendpoint\b/i.test(prompt)) {
+      for (const [commandName, commandRule] of Object.entries(candidateCommands)) {
+        if (matchesCommandTopic(commandName, commandRule, /\bapi\b|\bendpoint\b/i)) {
+          categorizedCommands.required.push(commandName);
+        }
+      }
+    }
+
+    if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt)) {
+      for (const [commandName, commandRule] of Object.entries(candidateCommands)) {
+        if (matchesCommandTopic(commandName, commandRule, /\bsecure|security|auth|authentication|authorization\b/i)) {
+          categorizedCommands.required.push(commandName);
+        }
+      }
+    }
+
     categorized.required = Array.from(new Set(categorized.required));
     categorized.suggested = Array.from(
       new Set(categorized.suggested.filter((skillName) => !categorized.required.includes(skillName)))
+    );
+    categorizedCommands.required = Array.from(new Set(categorizedCommands.required));
+    categorizedCommands.suggested = Array.from(
+      new Set(
+        categorizedCommands.suggested.filter(
+          (commandName) => !categorizedCommands.required.includes(commandName)
+        )
+      )
     );
 
     // Build result with optional debug scores

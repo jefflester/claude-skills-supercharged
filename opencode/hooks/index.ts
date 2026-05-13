@@ -344,7 +344,8 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
         const commandFiltration = filterCommandReferences(
           requiredCommands,
           suggestedCommands,
-          acknowledgedCommands
+          acknowledgedCommands,
+          commandRules
         );
         const alreadyLoadedCommands = Array.from(
           new Set(
