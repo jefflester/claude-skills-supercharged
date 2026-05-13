@@ -2,8 +2,8 @@
  * Cache management for intent analysis results
  *
  * Provides an LRU-style cache with automatic cleanup of stale entries.
- * Results are cached based on prompt + skills hash to invalidate when
- * skill definitions change.
+ * Persistent results are disabled by default. Enable cross-session reuse only
+ * with DYNAMIC_SKILLS_PERSISTENT_CACHE=ON.
  */
 
 import {
@@ -25,6 +25,10 @@ const CACHE_DIR = join(process.cwd(), '.opencode', 'cache', 'intent-analysis');
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 let lastCacheCleanupAt = 0;
 
+export function isPersistentCacheEnabled(): boolean {
+  return process.env.DYNAMIC_SKILLS_PERSISTENT_CACHE?.trim().toUpperCase() === 'ON';
+}
+
 /**
  * Read cached intent analysis result
  *
@@ -32,6 +36,10 @@ let lastCacheCleanupAt = 0;
  * @returns Cached result if found and not expired, null otherwise
  */
 export function readCache(key: string): AnalysisResult | null {
+  if (!isPersistentCacheEnabled()) {
+    return null;
+  }
+
   const cachePath = join(CACHE_DIR, `${key}.json`);
   if (!existsSync(cachePath)) {
     debugLog(`cache-manager: cache miss key=${key} path=${cachePath}`);
@@ -78,6 +86,10 @@ export function writeCache(
     'required' | 'suggested' | 'requiredCommands' | 'suggestedCommands' | 'commandScores'
   >
 ): void {
+  if (!isPersistentCacheEnabled()) {
+    return;
+  }
+
   // Ensure cache directory exists
   if (!existsSync(CACHE_DIR)) {
     mkdirSync(CACHE_DIR, { recursive: true });

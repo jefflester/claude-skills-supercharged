@@ -5,6 +5,7 @@ import { debugLog } from '../hooks/lib/debug-logger.js';
 import { buildSkillRulesFromSkills, SKILL_RULES_PATH, SKILLS_DIR } from '../hooks/lib/skill-discovery.js';
 import { discoverCommands, resolveCommandDiscoveryOptions } from '../hooks/lib/command-discovery.js';
 import { filterCommandReferences } from '../hooks/lib/command-filtration.js';
+import { MAX_REQUIRED_COMMANDS, MAX_SUGGESTED_COMMANDS } from '../hooks/lib/constants.js';
 import type {
   AnalysisResult,
   CommandRule,
@@ -321,6 +322,30 @@ function parseCommandSuggestedThreshold(requiredThreshold: number): number {
   );
 }
 
+function uniqueSortedCommandNames(
+  commandNames: string[],
+  scoreMap: Record<string, number>
+): string[] {
+  return Array.from(new Set(commandNames))
+    .map((commandName, index) => ({
+      commandName,
+      index,
+      score: scoreMap[commandName],
+    }))
+    .sort((left, right) => {
+      const leftHasScore = typeof left.score === 'number';
+      const rightHasScore = typeof right.score === 'number';
+      if (leftHasScore && rightHasScore && left.score !== right.score) {
+        return right.score - left.score;
+      }
+      if (leftHasScore !== rightHasScore) {
+        return leftHasScore ? -1 : 1;
+      }
+      return left.index - right.index;
+    })
+    .map((entry) => entry.commandName);
+}
+
 function buildConfidenceBuckets(
   analysis: AnalysisResult,
   threshold: number
@@ -365,7 +390,7 @@ function buildConfidenceBuckets(
   };
 }
 
-function buildCommandConfidenceBuckets(
+export function buildCommandConfidenceBuckets(
   analysis: AnalysisResult,
   threshold: number
 ): { required: string[]; suggested: string[]; scores: Record<string, number> } {
@@ -403,8 +428,8 @@ function buildCommandConfidenceBuckets(
   }
 
   return {
-    required: Array.from(new Set(requiredCommands)),
-    suggested: Array.from(new Set(suggestedCommands)),
+    required: uniqueSortedCommandNames(requiredCommands, scoreMap).slice(0, MAX_REQUIRED_COMMANDS),
+    suggested: uniqueSortedCommandNames(suggestedCommands, scoreMap).slice(0, MAX_SUGGESTED_COMMANDS),
     scores: scoreMap,
   };
 }

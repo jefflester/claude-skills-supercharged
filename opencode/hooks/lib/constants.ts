@@ -137,9 +137,10 @@ export const SHORT_PROMPT_WORD_THRESHOLD = parseInt(
   10
 );
 
-// Cache configuration for AI intent analysis
-// 1 hour TTL balances freshness vs API cost (~$0.0003 per analysis)
-// 24 hour cleanup prevents unbounded cache growth
+// Persistent cache configuration for AI intent analysis
+// Disabled unless DYNAMIC_SKILLS_PERSISTENT_CACHE=ON.
+// 1 hour TTL balances freshness vs API cost when persistent caching is enabled.
+// 24 hour cleanup prevents unbounded cache growth.
 // Override: SKILL_CACHE_TTL_MS
 export const CACHE_TTL_MS = parseInt(
   process.env.SKILL_CACHE_TTL_MS || String(60 * 60 * 1000),

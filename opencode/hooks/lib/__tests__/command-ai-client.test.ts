@@ -61,4 +61,15 @@ describe('command-aware AI client', () => {
     expect(prompt).not.toContain('@file');
     expect(prompt).not.toContain('scoring preview');
   });
+
+  it('renders skill and command thresholds from the runtime constants', () => {
+    const prompt = buildPrompt('Run checks', skills, commands);
+
+    expect(prompt).toContain('>= 0.65: REQUIRED skill reference');
+    expect(prompt).toContain('0.50 to < 0.65: SUGGESTED skill reference');
+    expect(prompt).toContain('>= 0.90: REQUIRED command reference');
+    expect(prompt).toContain('0.70 to < 0.90: SUGGESTED command reference');
+    expect(prompt).toContain('TOP 5 most relevant skills and TOP 5 most relevant commands');
+    expect(prompt).not.toContain('> 0.65: REQUIRED (auto-injected as critical skill)');
+  });
 });

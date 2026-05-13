@@ -11,8 +11,8 @@
 
 import { createHash } from 'crypto';
 import { SHORT_PROMPT_WORD_THRESHOLD, DEBUG_ENABLED, FALLBACK_DOMAIN_MODE } from './constants.js';
-import { readCache, writeCache } from './cache-manager.js';
-import { callAIForIntentAnalysis } from './ai-client.js';
+import { isPersistentCacheEnabled, readCache, writeCache } from './cache-manager.js';
+import { callAIForIntentAnalysis, getModel, getProvider } from './ai-client.js';
 import { matchSkillsByKeywords } from './keyword-matcher.js';
 import { debugLog } from './debug-logger.js';
 import {
@@ -44,6 +44,9 @@ const COMMON_TRIGGER_STOPWORDS = new Set([
   'which',
   'workflow',
 ]);
+
+const CACHE_SCHEMA_VERSION = 'candidate-v6';
+const DEFAULT_PLUGIN_VERSION = '1.0.0';
 
 function normalizeToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -292,7 +295,8 @@ function buildCommandFallback(
  *
  * Uses AI provider for intent analysis (configurable via OPENCODE_SKILLS_PROVIDER, default: anthropic)
  * to analyze the user's prompt and assign confidence scores to each skill. Falls back to keyword matching for short prompts
- * (5 words or fewer by default) or if AI analysis fails. Results are cached for 1 hour.
+ * (5 words or fewer by default) or if AI analysis fails. Persistent cross-session
+ * results are cached only when DYNAMIC_SKILLS_PERSISTENT_CACHE=ON.
  *
  * @param prompt - The user's input prompt to analyze
  * @param availableSkills - Record of skill configurations from skill-rules.json
@@ -326,7 +330,8 @@ export async function analyzeIntent(
     return { required: [], suggested: [] };
   }
 
-  // Check cache first - include candidate skills/commands hash to invalidate when definitions change
+  // Check opt-in persistent cache first. Include the model/scoring dimensions
+  // that can change required/suggested categorization across sessions.
   const skillsHash = createHash('md5')
     .update(JSON.stringify(candidateSkills))
     .digest('hex')
@@ -335,13 +340,35 @@ export async function analyzeIntent(
     .update(buildCommandMetadataFingerprint(candidateCommands))
     .digest('hex')
     .substring(0, 8);
+  const provider = getProvider();
+  const promptTemplateHash = createHash('md5')
+    .update(process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE || '')
+    .digest('hex')
+    .substring(0, 8);
+  const cacheDimensions = {
+    version: CACHE_SCHEMA_VERSION,
+    pluginVersion: process.env.npm_package_version || DEFAULT_PLUGIN_VERSION,
+    provider,
+    model: getModel(provider),
+    skillRequiredThreshold: process.env.SKILL_CONFIDENCE_THRESHOLD || '0.65',
+    skillSuggestedThreshold: process.env.SKILL_SUGGESTED_THRESHOLD || '0.50',
+    commandRequiredThreshold: process.env.COMMAND_CONFIDENCE_THRESHOLD || '0.90',
+    commandSuggestedThreshold: process.env.COMMAND_SUGGESTED_THRESHOLD || '0.70',
+    fallbackDomainMode: process.env.OPENCODE_SKILLS_FALLBACK_DOMAIN_MODE || FALLBACK_DOMAIN_MODE,
+    promptTemplateHash,
+    skillsHash,
+    commandsHash,
+  };
   const cacheKey = createHash('md5')
-    .update(`candidate-v5:${prompt}:${skillsHash}:${commandsHash}`)
+    .update(`${prompt}:${JSON.stringify(cacheDimensions)}`)
     .digest('hex');
 
-  const cached = readCache(cacheKey);
-  if (cached) {
-    return { ...cached, fromCache: true };
+  const persistentCacheEnabled = isPersistentCacheEnabled();
+  if (persistentCacheEnabled) {
+    const cached = readCache(cacheKey);
+    if (cached) {
+      return { ...cached, fromCache: true };
+    }
   }
 
   // Call AI provider
@@ -430,13 +457,15 @@ export async function analyzeIntent(
       }
     }
 
-    writeCache(cacheKey, {
-      required: result.required,
-      suggested: result.suggested,
-      requiredCommands: result.requiredCommands,
-      suggestedCommands: result.suggestedCommands,
-      commandScores: result.commandScores,
-    });
+    if (persistentCacheEnabled) {
+      writeCache(cacheKey, {
+        required: result.required,
+        suggested: result.suggested,
+        requiredCommands: result.requiredCommands,
+        suggestedCommands: result.suggestedCommands,
+        commandScores: result.commandScores,
+      });
+    }
     return result;
   } catch (error) {
     debugLog(

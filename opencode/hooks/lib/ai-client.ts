@@ -10,6 +10,14 @@ import { existsSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+import {
+  COMMAND_CONFIDENCE_THRESHOLD,
+  COMMAND_SUGGESTED_THRESHOLD,
+  CONFIDENCE_THRESHOLD,
+  MAX_REQUIRED_COMMANDS,
+  MAX_REQUIRED_SKILLS,
+  SUGGESTED_THRESHOLD,
+} from './constants.js';
 import { debugLog } from './debug-logger.js';
 import type { CommandRule, IntentAnalysis, SkillRule } from './types.js';
 
@@ -201,6 +209,10 @@ function buildCommandDescriptions(commands: Record<string, CommandRule>): string
   return lines.join('\n');
 }
 
+function formatThreshold(value: number): string {
+  return value.toFixed(2);
+}
+
 export function buildPrompt(
   prompt: string,
   skills: Record<string, SkillRule>,
@@ -211,7 +223,17 @@ export function buildPrompt(
   const renderedPrompt = promptTemplate
     .replace(/\{\{USER_PROMPT\}\}/g, () => prompt)
     .replace(/\{\{SKILL_DESCRIPTIONS\}\}/g, () => buildSkillDescriptions(skills))
-    .replace(/\{\{COMMAND_DESCRIPTIONS\}\}/g, () => commandDescriptions);
+    .replace(/\{\{COMMAND_DESCRIPTIONS\}\}/g, () => commandDescriptions)
+    .replace(/\{\{SKILL_REQUIRED_THRESHOLD\}\}/g, () => formatThreshold(CONFIDENCE_THRESHOLD))
+    .replace(/\{\{SKILL_SUGGESTED_THRESHOLD\}\}/g, () => formatThreshold(SUGGESTED_THRESHOLD))
+    .replace(/\{\{COMMAND_REQUIRED_THRESHOLD\}\}/g, () =>
+      formatThreshold(COMMAND_CONFIDENCE_THRESHOLD)
+    )
+    .replace(/\{\{COMMAND_SUGGESTED_THRESHOLD\}\}/g, () =>
+      formatThreshold(COMMAND_SUGGESTED_THRESHOLD)
+    )
+    .replace(/\{\{MAX_REQUIRED_SKILLS\}\}/g, () => String(MAX_REQUIRED_SKILLS))
+    .replace(/\{\{MAX_REQUIRED_COMMANDS\}\}/g, () => String(MAX_REQUIRED_COMMANDS));
 
   if (promptTemplate.includes('{{COMMAND_DESCRIPTIONS}}')) {
     return renderedPrompt;

@@ -1,8 +1,8 @@
 /**
  * Command filtering utilities.
  *
- * Commands mirror skill reference filtering: acknowledged filtering,
- * guardrail/domain cap behavior, suggested promotion, and dependency resolution.
+ * Commands mirror skill reference filtering where appropriate: acknowledged
+ * filtering, guardrail/domain cap behavior, and dependency resolution.
  */
 
 import { MAX_REQUIRED_COMMANDS } from './constants.js';
@@ -79,7 +79,8 @@ export function resolveCommandDependencies(
 }
 
 /**
- * Apply command injection limits with skill-like promotion behavior.
+ * Apply command injection limits. The required cap is a maximum, not a target:
+ * suggested commands remain suggested instead of being promoted to fill slots.
  */
 export function applyCommandReferenceLimits(
   requiredCommands: string[],
@@ -87,7 +88,7 @@ export function applyCommandReferenceLimits(
   acknowledgedRequiredCount: number,
   commandRules: Record<string, CommandRule>
 ): CommandFiltrationResult {
-  const targetSlots = MAX_REQUIRED_COMMANDS;
+  const maxRequiredSlots = MAX_REQUIRED_COMMANDS;
   const requiredGuardrails = requiredCommands.filter(
     (command) => commandRules[command]?.type === 'guardrail'
   );
@@ -101,31 +102,20 @@ export function applyCommandReferenceLimits(
     (command) => commandRules[command]?.type !== 'guardrail'
   );
 
-  const promotionTarget = Math.max(0, targetSlots - acknowledgedRequiredCount);
-  const domainToInject = [...requiredDomain.slice(0, promotionTarget)];
-  const needed = Math.max(0, promotionTarget - domainToInject.length);
-  const promoted: string[] = [];
+  const remainingRequiredSlots = Math.max(0, maxRequiredSlots - acknowledgedRequiredCount);
+  const domainToInject = [...requiredDomain.slice(0, remainingRequiredSlots)];
 
-  if (needed > 0 && suggestedDomain.length > 0) {
-    const promotedCommands = suggestedDomain.slice(0, needed);
-    promoted.push(...promotedCommands);
-    domainToInject.push(...promotedCommands);
-  }
-
-  const toInject = [...requiredGuardrails, ...suggestedGuardrails, ...domainToInject];
-  const remainingSuggested = suggestedDomain.filter(
-    (command) => !promoted.includes(command)
-  );
+  const toInject = [...requiredGuardrails, ...domainToInject];
 
   return {
     toInject,
-    promoted,
-    remainingSuggested,
+    promoted: [],
+    remainingSuggested: [...suggestedGuardrails, ...suggestedDomain],
   };
 }
 
 /**
- * Filter required/suggested command references with skill-like promotion.
+ * Filter required/suggested command references.
  */
 export function filterCommandReferences(
   requiredCommands: string[],

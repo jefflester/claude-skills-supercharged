@@ -53,7 +53,7 @@ describe('command scoring and filtration', () => {
     'security-review': { template: 'body', source: 'markdown' },
   };
 
-  it('filters acknowledged commands and promotes suggested commands like skills', () => {
+  it('filters acknowledged commands without promoting suggested commands into required slots', () => {
     expect(filterUnacknowledgedCommands(['a', 'b', 'c'], ['b'])).toEqual(['a', 'c']);
 
     expect(
@@ -64,9 +64,9 @@ describe('command scoring and filtration', () => {
         commandRules
       )
     ).toEqual({
-      toInject: ['quality-gate', 'plankton-code-quality'],
-      promoted: ['plankton-code-quality'],
-      remainingSuggested: [],
+      toInject: ['quality-gate'],
+      promoted: [],
+      remainingSuggested: ['plankton-code-quality'],
     });
   });
 
@@ -85,6 +85,19 @@ describe('command scoring and filtration', () => {
       filterCommandReferences(['guardrail', 'a', 'b', 'c', 'd', 'e', 'f'], [], [], rules)
         .toInject
     ).toEqual(['guardrail', 'a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('keeps suggested guardrail commands suggested', () => {
+    const rules: Record<string, CommandRule> = {
+      guardrail: { type: 'guardrail', template: 'body', source: 'markdown' },
+      domain: { template: 'body', source: 'markdown' },
+    };
+
+    expect(filterCommandReferences([], ['guardrail', 'domain'], [], rules)).toEqual({
+      toInject: [],
+      promoted: [],
+      remainingSuggested: ['guardrail', 'domain'],
+    });
   });
 
   it('resolves command dependencies and sorts by injection order', () => {

@@ -55,6 +55,7 @@ Set via environment variables:
 | `OPENCODE_AUTH_PATH` | Explicit OpenCode auth store path for API credentials | Auto-discovered from OpenCode data dir |
 | `OPENCODE_CONFIG_PATH` | Explicit OpenCode config path for command discovery | `<project>/opencode.json` |
 | `OPENCODE_COMMANDS_DIR` | One or more command markdown directories, separated by `;` or `,` | `<project>/commands`, `<project>/.opencode/commands` |
+| `DYNAMIC_SKILLS_PERSISTENT_CACHE` | Enable cross-session intent-analysis cache when set to `ON` | Off |
 
 ### Thresholds
 
@@ -65,7 +66,7 @@ Set via environment variables:
 | `COMMAND_CONFIDENCE_THRESHOLD` | Min confidence for required command references | `0.90` |
 | `COMMAND_SUGGESTED_THRESHOLD` | Min confidence for suggested command references | `0.70` |
 | `SKILL_SHORT_PROMPT_WORDS` | Word count for keyword fallback; AI analysis starts at 6+ words | `5` |
-| `SKILL_CACHE_TTL_MS` | Cache time-to-live | `1 hour` |
+| `SKILL_CACHE_TTL_MS` | Persistent cache time-to-live when `DYNAMIC_SKILLS_PERSISTENT_CACHE=ON` | `1 hour` |
 
 ## Usage
 

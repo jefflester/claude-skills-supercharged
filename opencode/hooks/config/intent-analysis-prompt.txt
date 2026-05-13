@@ -9,10 +9,15 @@ Available commands:
 {{COMMAND_DESCRIPTIONS}}
 
 IMPORTANT SCORING GUIDANCE:
-Confidence Thresholds:
-- > 0.65: REQUIRED (auto-injected as critical skill)
-- 0.50 to 0.65: SUGGESTED (recommended but not auto-injected)
-- < 0.50: IGNORED (not considered relevant)
+Skill confidence thresholds:
+- >= {{SKILL_REQUIRED_THRESHOLD}}: REQUIRED skill reference
+- {{SKILL_SUGGESTED_THRESHOLD}} to < {{SKILL_REQUIRED_THRESHOLD}}: SUGGESTED skill reference
+- < {{SKILL_SUGGESTED_THRESHOLD}}: IGNORED
+
+Command confidence thresholds:
+- >= {{COMMAND_REQUIRED_THRESHOLD}}: REQUIRED command reference
+- {{COMMAND_SUGGESTED_THRESHOLD}} to < {{COMMAND_REQUIRED_THRESHOLD}}: SUGGESTED command reference
+- < {{COMMAND_SUGGESTED_THRESHOLD}}: IGNORED
 
 Apply the same intent analysis to skills and commands:
 - Score skills by whether their domain knowledge is needed for the PRIMARY task.
@@ -35,9 +40,10 @@ EXAMPLES OF WHAT NOT TO SUGGEST:
 - "How does X work?" → Research/understanding ≠ implementing features
 
 CRITICAL SELECTION RULES:
-- You MUST select ONLY the TOP 5 most relevant skills and TOP 5 most relevant commands for the primary task (confidence > 0.65)
+- You MUST select ONLY the TOP {{MAX_REQUIRED_SKILLS}} most relevant skills and TOP {{MAX_REQUIRED_COMMANDS}} most relevant commands for the primary task.
 - Be extremely selective - prioritize the skills and commands most essential to completing the main action
-- Additional related skills and commands should be marked 0.5-0.7 (suggested, not critical)
+- Additional related skills should be scored between {{SKILL_SUGGESTED_THRESHOLD}} and < {{SKILL_REQUIRED_THRESHOLD}} when helpful but not critical.
+- Additional related commands should be scored between {{COMMAND_SUGGESTED_THRESHOLD}} and < {{COMMAND_REQUIRED_THRESHOLD}} when helpful but not critical.
 - If no skills or commands are truly essential, return 0 critical items
 - Focus on MAIN ACTION, not tangential mentions
 
@@ -78,7 +84,7 @@ SKILL-DEVELOPER DETECTION (Skills System Itself):
   * Working with actual code (not skill system code) → (0.10-0.30)
 
 Return JSON with confidence scores (0.0-1.0) for each skill's relevance to the PRIMARY task intent.
-Only include skills with confidence >= 0.50 (SUGGESTED threshold or higher).
+Only include skills with confidence >= {{SKILL_SUGGESTED_THRESHOLD}} and commands with confidence >= {{COMMAND_SUGGESTED_THRESHOLD}}.
 
 Response format:
 {

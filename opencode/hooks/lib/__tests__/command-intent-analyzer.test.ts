@@ -1,16 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   callAIForIntentAnalysis: vi.fn(),
+  getModel: vi.fn(),
+  getProvider: vi.fn(),
+  isPersistentCacheEnabled: vi.fn(),
   readCache: vi.fn(),
   writeCache: vi.fn(),
 }));
 
 vi.mock('../ai-client.js', () => ({
   callAIForIntentAnalysis: mocks.callAIForIntentAnalysis,
+  getModel: mocks.getModel,
+  getProvider: mocks.getProvider,
 }));
 
 vi.mock('../cache-manager.js', () => ({
+  isPersistentCacheEnabled: mocks.isPersistentCacheEnabled,
   readCache: mocks.readCache,
   writeCache: mocks.writeCache,
 }));
@@ -67,10 +73,22 @@ const commands: Record<string, CommandRule> = {
 describe('command-aware intent analyzer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getProvider.mockReturnValue('anthropic');
+    mocks.getModel.mockReturnValue('claude-haiku-4-5');
+    mocks.isPersistentCacheEnabled.mockReturnValue(false);
     mocks.readCache.mockReturnValue(null);
   });
 
+  afterEach(() => {
+    delete process.env.SKILL_CONFIDENCE_THRESHOLD;
+    delete process.env.SKILL_SUGGESTED_THRESHOLD;
+    delete process.env.COMMAND_CONFIDENCE_THRESHOLD;
+    delete process.env.COMMAND_SUGGESTED_THRESHOLD;
+    delete process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE;
+  });
+
   it('returns categorized command tiers, filters unknown commands, and caches command fields', async () => {
+    mocks.isPersistentCacheEnabled.mockReturnValue(true);
     mocks.callAIForIntentAnalysis.mockResolvedValue({
       primary_intent: 'quality review',
       skills: [{ name: 'tdd-workflow', confidence: 0.82, reason: 'tests' }],
@@ -112,6 +130,25 @@ describe('command-aware intent analyzer', () => {
         },
       })
     );
+  });
+
+  it('does not read or write the persistent intent cache unless explicitly enabled', async () => {
+    mocks.callAIForIntentAnalysis.mockResolvedValue({
+      primary_intent: 'quality review',
+      skills: [],
+      commands: [{ name: 'quality-gate', confidence: 0.95, reason: 'quality workflow' }],
+    });
+
+    const result = await analyzeIntent(
+      'Please run the quality gate review workflow for this change',
+      skills,
+      commands
+    );
+
+    expect(result.fromCache).toBeUndefined();
+    expect(mocks.readCache).not.toHaveBeenCalled();
+    expect(mocks.writeCache).not.toHaveBeenCalled();
+    expect(mocks.callAIForIntentAnalysis).toHaveBeenCalledOnce();
   });
 
   it('falls back to suggested command references when AI analysis fails', async () => {
@@ -170,6 +207,7 @@ describe('command-aware intent analyzer', () => {
   });
 
   it('changes cache key when command summary metadata changes', async () => {
+    mocks.isPersistentCacheEnabled.mockReturnValue(true);
     mocks.callAIForIntentAnalysis.mockResolvedValue({
       primary_intent: 'quality review',
       skills: [],
@@ -194,6 +232,45 @@ describe('command-aware intent analyzer', () => {
         source: 'config',
       },
     });
+
+    const firstCacheKey = mocks.readCache.mock.calls[0]?.[0];
+    const secondCacheKey = mocks.readCache.mock.calls[1]?.[0];
+    expect(firstCacheKey).toBeDefined();
+    expect(secondCacheKey).toBeDefined();
+    expect(firstCacheKey).not.toEqual(secondCacheKey);
+  });
+
+  it('changes cache key when provider, model, thresholds, or prompt template change', async () => {
+    mocks.isPersistentCacheEnabled.mockReturnValue(true);
+    mocks.callAIForIntentAnalysis.mockResolvedValue({
+      primary_intent: 'quality review',
+      skills: [],
+      commands: [{ name: 'quality-gate', confidence: 0.95, reason: 'quality workflow' }],
+    });
+
+    mocks.getProvider.mockReturnValue('anthropic');
+    mocks.getModel.mockReturnValue('claude-haiku-4-5');
+    process.env.SKILL_CONFIDENCE_THRESHOLD = '0.65';
+    process.env.SKILL_SUGGESTED_THRESHOLD = '0.50';
+    process.env.COMMAND_CONFIDENCE_THRESHOLD = '0.90';
+    process.env.COMMAND_SUGGESTED_THRESHOLD = '0.70';
+    process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE = 'template-a';
+    await analyzeIntent('Run quality review checks for this change request', {}, commands);
+
+    mocks.getProvider.mockReturnValue('openai');
+    mocks.getModel.mockReturnValue('gpt-4o-mini');
+    process.env.SKILL_CONFIDENCE_THRESHOLD = '0.75';
+    process.env.SKILL_SUGGESTED_THRESHOLD = '0.55';
+    process.env.COMMAND_CONFIDENCE_THRESHOLD = '0.85';
+    process.env.COMMAND_SUGGESTED_THRESHOLD = '0.65';
+    process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE = 'template-b';
+    await analyzeIntent('Run quality review checks for this change request', {}, commands);
+
+    delete process.env.SKILL_CONFIDENCE_THRESHOLD;
+    delete process.env.SKILL_SUGGESTED_THRESHOLD;
+    delete process.env.COMMAND_CONFIDENCE_THRESHOLD;
+    delete process.env.COMMAND_SUGGESTED_THRESHOLD;
+    delete process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE;
 
     const firstCacheKey = mocks.readCache.mock.calls[0]?.[0];
     const secondCacheKey = mocks.readCache.mock.calls[1]?.[0];
