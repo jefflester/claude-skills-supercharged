@@ -1,5 +1,7 @@
+import { createHash } from 'crypto';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { access, readFile, unlink } from 'fs/promises';
-import { join } from 'path';
+import { extname, join } from 'path';
 import { analyzeIntent } from './lib/intent-analyzer.js';
 import { resolveSkillDependencies } from './lib/skill-resolution.js';
 import { filterAndPromoteSkills, findAffinityInjections } from './lib/skill-filtration.js';
@@ -24,7 +26,7 @@ import {
 } from './lib/output-formatter.js';
 import { debugLog } from './lib/debug-logger.js';
 import { buildSkillRulesFromSkills, SKILL_RULES_PATH, SKILLS_DIR } from './lib/skill-discovery.js';
-import type { AnalysisResult, SkillRule, SkillRulesConfig } from './lib/types.js';
+import type { AnalysisResult, CommandRule, SkillRule, SkillRulesConfig } from './lib/types.js';
 
 interface PluginInputLike {
   directory: string;
@@ -81,6 +83,11 @@ interface HooksLike {
 interface SessionRuntimeState {
   analysis?: AnalysisResult;
   injected: boolean;
+}
+
+interface CommandDiscoveryCache {
+  signature: string;
+  rules: Record<string, CommandRule>;
 }
 
 const sessionRuntimeState = new Map<string, SessionRuntimeState>();
@@ -229,8 +236,76 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
   const projectDirectory = process.env.OPENCODE_PROJECT_DIR || process.cwd();
   const stateDirectory = await resolveStateDirectory(input.directory, projectDirectory);
   const skillRules = await loadSkillRules();
-  let commandRules = discoverCommands(resolveCommandDiscoveryOptions(projectDirectory));
+  const commandDiscoveryOptions = resolveCommandDiscoveryOptions(projectDirectory);
+  let commandRulesCache: CommandDiscoveryCache = {
+    signature: '',
+    rules: Object.create(null) as Record<string, CommandRule>,
+  };
   const availableSkillNames = new Set(Object.keys(skillRules.skills));
+
+  function buildCommandDiscoverySignature(): string {
+    const parts: string[] = [];
+    const configPath = commandDiscoveryOptions.configPath;
+
+    try {
+      if (configPath) {
+        if (existsSync(configPath)) {
+          const configContent = readFileSync(configPath, 'utf-8');
+          const configHash = createHash('md5').update(configContent).digest('hex').slice(0, 12);
+          parts.push(`config:${configPath}:${configHash}`);
+        } else {
+          parts.push(`config:${configPath}:missing`);
+        }
+      }
+    } catch {
+      parts.push(`config:${configPath}:unreadable`);
+    }
+
+    const commandsDirs = (commandDiscoveryOptions.commandsDirs || []).slice().sort();
+    for (const commandsDir of commandsDirs) {
+      try {
+        if (!existsSync(commandsDir)) {
+          parts.push(`dir:${commandsDir}:missing`);
+          continue;
+        }
+
+        const entries = readdirSync(commandsDir)
+          .filter((entry) => extname(entry).toLowerCase() === '.md')
+          .sort();
+        parts.push(`dir:${commandsDir}:count=${entries.length}`);
+
+        for (const entry of entries) {
+          const fullPath = join(commandsDir, entry);
+          try {
+            const fileContent = readFileSync(fullPath, 'utf-8');
+            const fileHash = createHash('md5').update(fileContent).digest('hex').slice(0, 12);
+            parts.push(`file:${commandsDir}\\${entry}:${fileHash}`);
+          } catch {
+            parts.push(`file:${commandsDir}\\${entry}:unreadable`);
+          }
+        }
+      } catch {
+        parts.push(`dir:${commandsDir}:unreadable`);
+      }
+    }
+
+    return parts.join('|');
+  }
+
+  function getCommandRulesFromCache(): Record<string, CommandRule> {
+    const signature = buildCommandDiscoverySignature();
+    if (signature === commandRulesCache.signature) {
+      return commandRulesCache.rules;
+    }
+
+    try {
+      const rules = discoverCommands(commandDiscoveryOptions);
+      commandRulesCache = { signature, rules };
+      return rules;
+    } catch {
+      return commandRulesCache.rules;
+    }
+  }
 
   async function fetchUserPrompt(sessionID: string): Promise<string> {
     try {
@@ -295,12 +370,13 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
     },
     'experimental.chat.system.transform': async ({ sessionID }, output) => {
       try {
-        commandRules = discoverCommands(resolveCommandDiscoveryOptions(projectDirectory));
-        const availableCommandNames = new Set(Object.keys(commandRules));
         let runtimeState = sessionRuntimeState.get(sessionID);
         if (runtimeState?.injected) {
           return;
         }
+
+        const commandRules = getCommandRulesFromCache();
+        const availableCommandNames = new Set(Object.keys(commandRules));
 
         if (!runtimeState?.analysis) {
           const userPrompt = await fetchUserPrompt(sessionID);

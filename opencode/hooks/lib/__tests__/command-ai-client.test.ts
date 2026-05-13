@@ -12,6 +12,8 @@ const skills: Record<string, SkillRule> = {
 const commands: Record<string, CommandRule> = {
   'quality-gate': {
     description: 'Run the ECC quality gate.',
+    workflowPhase: 'Code Review',
+    summary: 'Validate lint, tests, and typecheck before merge.',
     template: 'Full command body with !npm test and @file should only be used as scoring preview.',
     agent: 'build-error-resolver',
     source: 'markdown',
@@ -48,13 +50,13 @@ describe('command-aware AI client', () => {
     ).toEqual([]);
   });
 
-  it('includes command names and descriptions in the prompt without command metadata or template previews', () => {
+  it('includes command names, workflow phase, and summary in the prompt without template previews', () => {
     const prompt = buildPrompt('Run checks', skills, commands);
 
     expect(prompt).toContain('Available commands');
     expect(prompt).toContain('- quality-gate: Run the ECC quality gate.');
-    expect(prompt).not.toContain('Agent: build-error-resolver');
-    expect(prompt).not.toContain('Source: markdown');
+    expect(prompt).toContain('Workflow phase: Code Review.');
+    expect(prompt).toContain('Summary: Validate lint, tests, and typecheck before merge.');
     expect(prompt).not.toContain('!npm test');
     expect(prompt).not.toContain('@file');
     expect(prompt).not.toContain('scoring preview');

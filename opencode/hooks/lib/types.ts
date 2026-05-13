@@ -79,6 +79,8 @@ export interface SkillRulesConfig {
 export interface CommandRule {
   type?: 'guardrail' | 'domain';
   description?: string;
+  summary?: string;
+  workflowPhase?: string;
   template: string;
   autoInject?: boolean;
   requiredCommands?: string[];

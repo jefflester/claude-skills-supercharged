@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'crypto';
-import { SHORT_PROMPT_WORD_THRESHOLD, DEBUG_ENABLED } from './constants.js';
+import { SHORT_PROMPT_WORD_THRESHOLD, DEBUG_ENABLED, FALLBACK_DOMAIN_MODE } from './constants.js';
 import { readCache, writeCache } from './cache-manager.js';
 import { callAIForIntentAnalysis } from './ai-client.js';
 import { matchSkillsByKeywords } from './keyword-matcher.js';
@@ -119,6 +119,23 @@ function scoreCandidateSkill(
     }
   }
 
+  const descriptionTokens = Array.from(
+    new Set(
+      (skillRule.description || '')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/g)
+        .map((token) => token.replace(/s$/, ''))
+        .filter((token) => token.length >= 4 && !COMMON_TRIGGER_STOPWORDS.has(token))
+    )
+  ).slice(0, 24);
+  let descriptionScore = 0;
+  for (const token of descriptionTokens) {
+    if (tokenMatches(promptTokens, token)) {
+      descriptionScore += 1;
+    }
+  }
+  score += Math.min(descriptionScore, 6);
+
   if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt) && /security|auth/.test(skillNameLower)) {
     score += 5;
   }
@@ -149,10 +166,16 @@ function selectCandidateSkills(
   return Object.fromEntries(scored.map(({ skillName, skillRule }) => [skillName, skillRule]));
 }
 
-function commandRuleAsSkillRule(commandName: string, commandRule: CommandRule): SkillRule {
+function commandRuleAsSkillRule(commandRule: CommandRule): SkillRule {
+  const commandDescriptionParts = [
+    commandRule.description,
+    commandRule.workflowPhase ? `Workflow phase: ${commandRule.workflowPhase}` : undefined,
+    commandRule.summary ? `Summary: ${commandRule.summary}` : undefined,
+  ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+
   return {
     type: commandRule.type || 'domain',
-    description: commandRule.description,
+    description: commandDescriptionParts.length > 0 ? commandDescriptionParts.join('. ') : undefined,
     autoInject: commandRule.autoInject,
     requiredSkills: commandRule.requiredCommands,
     injectionOrder: commandRule.injectionOrder,
@@ -174,7 +197,7 @@ function selectCandidateCommands(
         prompt,
         promptTokens,
         commandName,
-        commandRuleAsSkillRule(commandName, commandRule)
+        commandRuleAsSkillRule(commandRule)
       ),
     }))
     .filter((candidate) => candidate.score > 0)
@@ -192,6 +215,8 @@ function buildCommandMetadataFingerprint(commands: Record<string, CommandRule>):
     .map(([name, rule]) => ({
       name,
       description: rule.description || '',
+      summary: rule.summary || '',
+      workflowPhase: rule.workflowPhase || '',
       type: rule.type || '',
       autoInject: Boolean(rule.autoInject),
       requiredCommands: rule.requiredCommands || [],
@@ -213,21 +238,53 @@ function buildCommandFallback(
   const commandRules = Object.fromEntries(
     Object.entries(availableCommands).map(([commandName, commandRule]) => [
       commandName,
-      commandRuleAsSkillRule(commandName, commandRule),
+      commandRuleAsSkillRule(commandRule),
     ])
   );
   const matched = matchSkillsByKeywords(prompt, commandRules);
+  const requiredCommands = new Set(matched.required);
+  const suggestedCommands = new Set(matched.suggested);
+
+  const scoredCandidates =
+    FALLBACK_DOMAIN_MODE === 'off'
+      ? selectCandidateCommands(
+          prompt,
+          Object.fromEntries(
+            Object.entries(availableCommands).filter(
+              ([, commandRule]) => commandRule.autoInject === true
+            )
+          )
+        )
+      : selectCandidateCommands(prompt, availableCommands);
+  for (const [commandName, commandRule] of Object.entries(scoredCandidates)) {
+    if (requiredCommands.has(commandName)) continue;
+
+    if (commandRule.autoInject === true) {
+      requiredCommands.add(commandName);
+      suggestedCommands.delete(commandName);
+      continue;
+    }
+
+    switch (FALLBACK_DOMAIN_MODE) {
+      case 'inject':
+        requiredCommands.add(commandName);
+        suggestedCommands.delete(commandName);
+        break;
+      case 'suggest':
+      case 'off':
+      default:
+        suggestedCommands.add(commandName);
+        break;
+    }
+  }
 
   return {
-    requiredCommands: matched.required,
-    suggestedCommands: matched.suggested,
+    requiredCommands: Array.from(requiredCommands),
+    suggestedCommands: Array.from(
+      new Set(Array.from(suggestedCommands).filter((commandName) => !requiredCommands.has(commandName)))
+    ),
     commandScores: {},
   };
-}
-
-function matchesCommandTopic(commandName: string, commandRule: CommandRule, topicPattern: RegExp): boolean {
-  const searchable = `${commandName} ${commandRule.description || ''}`;
-  return topicPattern.test(searchable);
 }
 
 /**
@@ -279,7 +336,7 @@ export async function analyzeIntent(
     .digest('hex')
     .substring(0, 8);
   const cacheKey = createHash('md5')
-    .update(`candidate-v4:${prompt}:${skillsHash}:${commandsHash}`)
+    .update(`candidate-v5:${prompt}:${skillsHash}:${commandsHash}`)
     .digest('hex');
 
   const cached = readCache(cacheKey);
@@ -316,19 +373,16 @@ export async function analyzeIntent(
       categorized.required.push('security-review');
     }
 
-    if (/\bapi\b|\bendpoint\b/i.test(prompt)) {
-      for (const [commandName, commandRule] of Object.entries(candidateCommands)) {
-        if (matchesCommandTopic(commandName, commandRule, /\bapi\b|\bendpoint\b/i)) {
-          categorizedCommands.required.push(commandName);
-        }
-      }
+    if (/\bapi\b|\bendpoint\b/i.test(prompt) && candidateCommandNames.has('api-design')) {
+      categorizedCommands.required.push('api-design');
     }
 
     if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt)) {
-      for (const [commandName, commandRule] of Object.entries(candidateCommands)) {
-        if (matchesCommandTopic(commandName, commandRule, /\bsecure|security|auth|authentication|authorization\b/i)) {
-          categorizedCommands.required.push(commandName);
-        }
+      if (candidateCommandNames.has('security')) {
+        categorizedCommands.required.push('security');
+      }
+      if (candidateCommandNames.has('security-review')) {
+        categorizedCommands.required.push('security-review');
       }
     }
 

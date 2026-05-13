@@ -8,6 +8,7 @@ import { getSessionStatePath } from '../lib/skill-state-manager.js';
 const analyzeIntentMock = vi.fn();
 const mocks = vi.hoisted(() => ({
   debugLog: vi.fn(),
+  discoverCommands: vi.fn(),
 }));
 
 vi.mock('../lib/intent-analyzer.js', () => ({
@@ -33,25 +34,31 @@ vi.mock('../lib/skill-discovery.js', () => ({
 }));
 
 vi.mock('../lib/command-discovery.js', () => ({
-  discoverCommands: () => ({
+  discoverCommands: mocks.discoverCommands,
+  resolveCommandDiscoveryOptions: () => ({
+    configPath: 'C:\\mock\\opencode.json',
+    commandsDirs: ['C:\\mock\\commands'],
+  }),
+}));
+
+const discoveredCommands = {
     'quality-gate': {
       description: 'Run quality checks',
+      workflowPhase: 'Code Review',
+      summary: 'UNIQUE_SUMMARY_SHOULD_NOT_INJECT',
       template: 'Full body must not appear. !npm test @secret $ARGUMENTS',
       source: 'markdown',
       sourcePath: 'C:\\mock\\commands\\quality-gate.md',
     },
     'code-review': {
       description: 'Review code changes',
+      workflowPhase: 'Code Review',
+      summary: 'SECOND_UNIQUE_SUMMARY_SHOULD_NOT_INJECT',
       template: 'Review body must not appear.',
       source: 'markdown',
       sourcePath: 'C:\\mock\\commands\\code-review.md',
     },
-  }),
-  resolveCommandDiscoveryOptions: () => ({
-    configPath: 'C:\\mock\\opencode.json',
-    commandsDirs: ['C:\\mock\\commands'],
-  }),
-}));
+  };
 
 async function createHooks() {
   const { default: plugin } = await import('../index.js');
@@ -81,6 +88,8 @@ describe('command hook behavior', () => {
     vi.resetModules();
     analyzeIntentMock.mockReset();
     mocks.debugLog.mockReset();
+    mocks.discoverCommands.mockReset();
+    mocks.discoverCommands.mockReturnValue(discoveredCommands);
     analyzeIntentMock.mockResolvedValue({
       required: [],
       suggested: [],
@@ -165,6 +174,19 @@ describe('command hook behavior', () => {
     expect(secondOutput.system.join('\n')).not.toContain('[$quality-gate]');
   });
 
+  it('reuses discovered commands across transform calls when command sources are unchanged', async () => {
+    const { hooks } = await createHooks();
+    const firstOutput = { system: [] as string[] };
+    const secondOutput = { system: [] as string[] };
+
+    await hooks.event?.({ event: { type: 'session.created', properties: { info: { id: 's-cache-1' } } } });
+    await hooks['experimental.chat.system.transform']?.({ sessionID: 's-cache-1', model: {} }, firstOutput);
+    await hooks.event?.({ event: { type: 'session.created', properties: { info: { id: 's-cache-2' } } } });
+    await hooks['experimental.chat.system.transform']?.({ sessionID: 's-cache-2', model: {} }, secondOutput);
+
+    expect(mocks.discoverCommands).toHaveBeenCalledTimes(1);
+  });
+
   it('never emits command body or template text into output.system', async () => {
     const { hooks } = await createHooks();
     const output = { system: [] as string[] };
@@ -174,6 +196,8 @@ describe('command hook behavior', () => {
 
     const joined = output.system.join('\n');
     expect(joined).not.toContain('Full body must not appear');
+    expect(joined).not.toContain('UNIQUE_SUMMARY_SHOULD_NOT_INJECT');
+    expect(joined).not.toContain('SECOND_UNIQUE_SUMMARY_SHOULD_NOT_INJECT');
     expect(joined).not.toContain('!npm test');
     expect(joined).not.toContain('@secret');
     expect(joined).not.toContain('$ARGUMENTS');

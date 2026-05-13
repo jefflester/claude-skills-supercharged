@@ -39,6 +39,7 @@ Create a detailed plan for $ARGUMENTS.
     expect(rule).toMatchObject({
       type: 'guardrail',
       description: 'Create a PRP plan',
+      workflowPhase: 'Planning & Architecture',
       autoInject: true,
       requiredCommands: ['verify', 'update-docs'],
       injectionOrder: 12,
@@ -50,6 +51,7 @@ Create a detailed plan for $ARGUMENTS.
       source: 'markdown',
       sourcePath: 'C:\\commands\\prp-plan.md',
     });
+    expect(rule.summary).toBeUndefined();
   });
 
   it('discovers markdown commands and skips unreadable or non-markdown entries', () => {
@@ -92,6 +94,7 @@ Markdown body.`
           review: {
             template: 'Config body.',
             description: 'Config review',
+            summary: 'Use this to perform a final code review gate.',
             type: 'guardrail',
             autoInject: true,
             requiredCommands: ['verify'],
@@ -112,6 +115,7 @@ Markdown body.`
       review: {
         type: 'guardrail',
         description: 'Config review',
+        summary: expect.stringContaining('final code review gate'),
         autoInject: true,
         requiredCommands: ['verify'],
         injectionOrder: 20,
@@ -127,6 +131,180 @@ Markdown body.`
         subtask: true,
       },
     });
+  });
+
+  it('derives bounded sanitized summary from markdown body when explicit summary is absent', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'verify',
+      `---
+description: Verify implementation quality thoroughly.
+---
+## Intent
+Confirm quality and test coverage before final delivery.
+!npm test
+@secrets.env
+$ARGUMENTS
+\`\`\`bash
+pnpm run check
+\`\`\`
+token=abc123
+`,
+      'C:\\commands\\verify.md'
+    );
+
+    expect(rule.workflowPhase).toBe('Testing');
+    expect(rule.summary).toContain('Confirm quality and test coverage before final delivery.');
+    expect(rule.summary).not.toContain('!npm test');
+    expect(rule.summary).not.toContain('@secrets.env');
+    expect(rule.summary).not.toContain('$ARGUMENTS');
+    expect(rule.summary).not.toContain('pnpm run check');
+    expect((rule.summary || '').length).toBeLessThanOrEqual(320);
+  });
+
+  it('skips fenced code block content and list-prefixed shell commands in derived summary', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'verify',
+      `---
+description: Verify command
+---
+- npm test
+1. cargo build
+\`\`\`bash
+echo "should not leak"
+pytest -q
+\`\`\`
+## Goal
+Capture final verification intent in prose.
+`,
+      'C:\\commands\\verify.md'
+    );
+
+    expect(rule.summary).toContain('Goal');
+    expect(rule.summary).toContain('Capture final verification intent in prose.');
+    expect(rule.summary).not.toContain('npm test');
+    expect(rule.summary).not.toContain('cargo build');
+    expect(rule.summary).not.toContain('should not leak');
+    expect(rule.summary).not.toContain('pytest -q');
+  });
+
+  it('removes inline shell command syntax from explicit summaries while keeping prose', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'quality-gate',
+      `---
+description: Quality gate command
+summary: Run npm test before merge, then pnpm run check, and validate the final result quality.
+---
+Template body.`,
+      'C:\\commands\\quality-gate.md'
+    );
+
+    expect(rule.summary).toContain('validate the final result quality');
+    expect(rule.summary).not.toContain('npm test');
+    expect(rule.summary).not.toContain('pnpm run check');
+    expect(rule.summary).not.toContain('Run npm');
+    expect(rule.summary).not.toContain('then pnpm');
+  });
+
+  it('removes inline repo command forms and preserves scoped package prose', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'quality-gate',
+      `---
+description: Quality gate command
+summary: Run npx tsx scripts/check.ts, then bunx vitest run command and tsc --noEmit. Use @types/node for type support and keep eslint guidance documented.
+---
+Template body.`,
+      'C:\\commands\\quality-gate.md'
+    );
+
+    expect(rule.summary).not.toContain('npx tsx');
+    expect(rule.summary).not.toContain('bunx vitest run');
+    expect(rule.summary).not.toContain('tsc --noEmit');
+    expect(rule.summary).toContain('@types/node');
+    expect(rule.summary).toContain('keep eslint guidance documented');
+  });
+
+  it('preserves normal prose with tool words and slash-delimited terms', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'quality-gate',
+      `---
+description: Quality gate command
+summary: Use npm package updates and validate CI/CD request/response auth/secret behavior. Go through the checklist and make sure docs are updated.
+---
+Template body.`,
+      'C:\\commands\\quality-gate.md'
+    );
+
+    expect(rule.summary).toContain('Use npm package updates');
+    expect(rule.summary).toContain('CI/CD');
+    expect(rule.summary).toContain('request/response');
+    expect(rule.summary).toContain('auth/secret');
+    expect(rule.summary).toContain('Go through the checklist');
+    expect(rule.summary).toContain('make sure docs are updated');
+  });
+
+  it('keeps imperative prose lines while filtering actual shell lines', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'verify',
+      `---
+description: Verify command
+---
+Go through the verification checklist for release readiness.
+Make sure docs are updated before sign-off.
+go test ./...
+make test
+`,
+      'C:\\commands\\verify.md'
+    );
+
+    expect(rule.summary).toContain('Go through the verification checklist');
+    expect(rule.summary).toContain('Make sure docs are updated');
+    expect(rule.summary).not.toContain('go test ./...');
+    expect(rule.summary).not.toContain('make test');
+  });
+
+  it('filters line-based npx/bunx/tsx/tsc/eslint/vitest commands from derived summaries', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'verify',
+      `---
+description: Verify command
+---
+npx tsx scripts/verify.ts
+bunx vitest run command-discovery
+tsx scripts/check.ts
+tsc --noEmit
+eslint .
+eslint --fix
+vitest run command
+Preserve this prose line for summary context.
+`,
+      'C:\\commands\\verify.md'
+    );
+
+    expect(rule.summary).toContain('Preserve this prose line for summary context.');
+    expect(rule.summary).not.toContain('npx tsx');
+    expect(rule.summary).not.toContain('bunx vitest run');
+    expect(rule.summary).not.toContain('tsx scripts/check.ts');
+    expect(rule.summary).not.toContain('tsc --noEmit');
+    expect(rule.summary).not.toContain('eslint .');
+    expect(rule.summary).not.toContain('eslint --fix');
+    expect(rule.summary).not.toContain('vitest run');
+  });
+
+  it('removes only placeholder-style @ references while preserving scoped packages', () => {
+    const rule = buildCommandRuleFromMarkdown(
+      'quality-gate',
+      `---
+description: Quality gate command
+summary: Resolve @types/node and @babel/core compatibility, then reference @./local/file.md and @/abs/path.md placeholders.
+---
+Template body.`,
+      'C:\\commands\\quality-gate.md'
+    );
+
+    expect(rule.summary).toContain('@types/node');
+    expect(rule.summary).toContain('@babel/core');
+    expect(rule.summary).not.toContain('@/abs/path.md');
+    expect(rule.summary).not.toContain('@./local/file.md');
   });
 
   it('parses JSONC-like config with comments and trailing commas', () => {

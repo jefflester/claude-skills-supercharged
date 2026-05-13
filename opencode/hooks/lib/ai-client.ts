@@ -153,18 +153,52 @@ function buildSkillDescriptions(skills: Record<string, SkillRule>): string {
 }
 
 function buildCommandDescriptions(commands: Record<string, CommandRule>): string {
-  const sanitizeName = (name: string): string =>
-    name
+  const MAX_DESCRIPTION_CHARS = 180;
+  const MAX_SUMMARY_CHARS = 260;
+  const MAX_LINE_CHARS = 560;
+  const MAX_TOTAL_CHARS = 12000;
+
+  const sanitizeText = (text: string): string =>
+    text
       .replace(/[\r\n\t]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
-  return Object.entries(commands)
-    .map(([commandName, commandRule]) => {
-      const description = commandRule.description || 'No description provided.';
-      return `- ${sanitizeName(commandName)}: ${description}`;
-    })
-    .join('\n');
+  const truncate = (text: string, maxChars: number): string => {
+    if (text.length <= maxChars) return text;
+    const truncated = text.slice(0, maxChars).trimEnd();
+    return /[.!?]$/.test(truncated) ? truncated : `${truncated}...`;
+  };
+
+  const lines: string[] = [];
+  let totalChars = 0;
+
+  for (const [commandName, commandRule] of Object.entries(commands)) {
+      const description = truncate(
+        sanitizeText(commandRule.description || 'No description provided.'),
+        MAX_DESCRIPTION_CHARS
+      );
+      const workflowPhase = commandRule.workflowPhase
+        ? ` Workflow phase: ${sanitizeText(commandRule.workflowPhase)}.`
+        : '';
+      const summaryText = commandRule.summary
+        ? truncate(sanitizeText(commandRule.summary), MAX_SUMMARY_CHARS)
+        : '';
+      const summary = summaryText ? ` Summary: ${summaryText}.` : '';
+      const line = truncate(
+        `- ${sanitizeText(commandName)}: ${description}.${workflowPhase}${summary}`,
+        MAX_LINE_CHARS
+      );
+
+      if (totalChars + line.length > MAX_TOTAL_CHARS) {
+        break;
+      }
+
+      lines.push(line);
+      totalChars += line.length + 1;
+  }
+
+  return lines.join('\n');
 }
 
 export function buildPrompt(
