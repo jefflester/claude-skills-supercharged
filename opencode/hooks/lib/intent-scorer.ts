@@ -29,7 +29,7 @@ import type { IntentAnalysis, AnalysisResult } from './types.js';
 export function categorizeSkills(analysis: IntentAnalysis): AnalysisResult {
   // Validate input - guard against malformed API responses
   if (!Array.isArray(analysis.skills)) {
-    return { required: [], suggested: [] };
+    return { required: [], suggested: [], requiredCommands: [], suggestedCommands: [], commandScores: {} };
   }
 
   const required = analysis.skills
@@ -44,7 +44,7 @@ export function categorizeSkills(analysis: IntentAnalysis): AnalysisResult {
     .slice(0, MAX_SUGGESTED_SKILLS)
     .map((s) => s.name);
 
-  return { required, suggested };
+  return { required, suggested, requiredCommands: [], suggestedCommands: [], commandScores: {} };
 }
 
 /**
@@ -52,7 +52,7 @@ export function categorizeSkills(analysis: IntentAnalysis): AnalysisResult {
  */
 export function categorizeCommands(analysis: IntentAnalysis): AnalysisResult {
   if (!Array.isArray(analysis.commands)) {
-    return { required: [], suggested: [] };
+    return { required: [], suggested: [], requiredCommands: [], suggestedCommands: [], commandScores: {} };
   }
 
   const required = analysis.commands
@@ -71,7 +71,7 @@ export function categorizeCommands(analysis: IntentAnalysis): AnalysisResult {
     .slice(0, MAX_SUGGESTED_COMMANDS)
     .map((c) => c.name);
 
-  return { required, suggested };
+  return { required, suggested, requiredCommands: [], suggestedCommands: [], commandScores: {} };
 }
 
 /**
@@ -83,24 +83,30 @@ export function categorizeCommands(analysis: IntentAnalysis): AnalysisResult {
  * @param analysis - Intent analysis result from AI
  */
 export function formatDebugOutput(analysis: IntentAnalysis): void {
-  console.error('\n━━━━━━ AI INTENT ANALYSIS DEBUG ━━━━━━');
-  console.error(`Primary Intent: ${analysis.primary_intent}`);
-  console.error('\nAll Skills Scored:');
+  console.error('\n━━━━━━ AI INTENT ANALYSIS DEBUG ━━━━━━'); // eslint-disable-line no-console
+  console.error(`Primary Intent: ${analysis.primary_intent}`); // eslint-disable-line no-console
+  const skillRankings =
+    Array.isArray(analysis.skill_rankings) && analysis.skill_rankings.length > 0
+      ? analysis.skill_rankings
+      : analysis.skills;
+  const rankingLabel =
+    skillRankings === analysis.skills ? 'Returned Skills Scored' : 'All Skills Ranked';
+  console.error(`\n${rankingLabel}:`); // eslint-disable-line no-console
 
-  analysis.skills
-    .sort((a, b) => b.confidence - a.confidence)
-    .forEach((skill) => {
-      const tier =
-        skill.confidence > CONFIDENCE_THRESHOLD
-          ? 'REQUIRED'
-          : skill.confidence >= SUGGESTED_THRESHOLD
-            ? 'SUGGESTED'
-            : 'LOW';
-      console.error(`  ${skill.name.padEnd(25)} ${skill.confidence.toFixed(2)} [${tier}]`);
-      console.error(`    → ${skill.reason}`);
-    });
+  for (const skill of skillRankings.sort((a, b) => b.confidence - a.confidence)) {
+    const tier =
+      skill.confidence > CONFIDENCE_THRESHOLD
+        ? 'REQUIRED'
+        : skill.confidence >= SUGGESTED_THRESHOLD
+          ? 'SUGGESTED'
+          : 'LOW';
+    console.error(`  ${skill.name.padEnd(25)} ${skill.confidence.toFixed(2)} [${tier}]`); // eslint-disable-line no-console
+    if (skill.reason) {
+      console.error(`    → ${skill.reason}`); // eslint-disable-line no-console
+    }
+  }
 
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'); // eslint-disable-line no-console
 }
 
 /**
@@ -119,17 +125,32 @@ export function buildAnalysisResult(
   analysis: IntentAnalysis,
   includeScores: boolean
 ): AnalysisResult {
-  const result: AnalysisResult = {
-    required: categorized.required,
-    suggested: categorized.suggested,
-  };
-
-  if (includeScores) {
-    result.scores = {};
-    analysis.skills.forEach((skill) => {
-      result.scores![skill.name] = skill.confidence;
-    });
+  if (!includeScores) {
+    return {
+      required: categorized.required,
+      suggested: categorized.suggested,
+      requiredCommands: categorized.requiredCommands,
+      suggestedCommands: categorized.suggestedCommands,
+      commandScores: categorized.commandScores,
+    };
   }
 
-  return result;
+  const scoreSource =
+    Array.isArray(analysis.skill_rankings) && analysis.skill_rankings.length > 0
+      ? analysis.skill_rankings
+      : analysis.skills;
+
+  const scores: Record<string, number> = {};
+  for (const skill of scoreSource) {
+    scores[skill.name] = skill.confidence;
+  }
+
+  return {
+    required: categorized.required,
+    suggested: categorized.suggested,
+    scores,
+    requiredCommands: categorized.requiredCommands,
+    suggestedCommands: categorized.suggestedCommands,
+    commandScores: categorized.commandScores,
+  };
 }

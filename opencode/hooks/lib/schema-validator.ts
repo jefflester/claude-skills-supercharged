@@ -23,23 +23,35 @@ export interface ValidationResult {
  *   console.error('Validation errors:', result.errors);
  * }
  */
-export function validateSkillRules(skillRules: any): ValidationResult {
+export function validateSkillRules(skillRules: unknown): ValidationResult {
   const errors: string[] = [];
 
-  if (!skillRules.version) {
+  if (typeof skillRules !== 'object' || skillRules === null) {
+    errors.push('Skill rules must be a non-null object');
+    return { valid: false, errors };
+  }
+
+  const rules = skillRules as Record<string, unknown>;
+
+  if (!rules.version) {
     errors.push('Missing required field: version');
   }
 
-  if (!skillRules.skills || typeof skillRules.skills !== 'object') {
+  if (!rules.skills || typeof rules.skills !== 'object') {
     errors.push('Missing or invalid field: skills (must be object)');
     return { valid: false, errors };
   }
 
-  for (const [skillName, config] of Object.entries(skillRules.skills)) {
-    const skill = config as any;
+  for (const [skillName, config] of Object.entries(rules.skills as Record<string, unknown>)) {
+    if (typeof config !== 'object' || config === null) {
+      errors.push(`${skillName}: Skill config must be a non-null object`);
+      continue;
+    }
+
+    const skill = config as Record<string, unknown>;
 
     // Validate required fields
-    if (!skill.type || !['guardrail', 'domain'].includes(skill.type)) {
+    if (!skill.type || (skill.type !== 'guardrail' && skill.type !== 'domain')) {
       errors.push(`${skillName}: Invalid or missing 'type' (must be 'guardrail' or 'domain')`);
     }
 
@@ -48,7 +60,7 @@ export function validateSkillRules(skillRules: any): ValidationResult {
     }
 
     // Validate affinity if present
-    if (skill.affinity) {
+    if (skill.affinity !== undefined) {
       if (!Array.isArray(skill.affinity)) {
         errors.push(`${skillName}: affinity must be array`);
       } else if (skill.affinity.length > 2) {

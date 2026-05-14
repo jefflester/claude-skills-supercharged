@@ -5,6 +5,7 @@
  * filtering, guardrail/domain cap behavior, and dependency resolution.
  */
 
+import { debugLog } from './debug-logger.js';
 import { MAX_REQUIRED_COMMANDS } from './constants.js';
 import type { CommandRule } from './types.js';
 
@@ -65,10 +66,7 @@ export function resolveCommandDependencies(
   }
 
   if (errors.length > 0) {
-    console.error('Command dependency resolution errors:');
-    for (const error of errors) {
-      console.error(`  - ${error}`);
-    }
+    debugLog(`command-filtration: dependency errors: ${errors.join(', ')}`);
   }
 
   return Array.from(resolved).sort((a, b) => {

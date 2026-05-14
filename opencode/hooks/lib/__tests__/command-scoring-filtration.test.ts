@@ -23,6 +23,9 @@ describe('command scoring and filtration', () => {
     expect(categorizeCommands(analysis)).toEqual({
       required: ['required-boundary'],
       suggested: ['suggested-high', 'suggested-boundary'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
     });
   });
 
@@ -43,6 +46,9 @@ describe('command scoring and filtration', () => {
     expect(categorizeCommands(analysis)).toEqual({
       required: ['required-high', 'required-mid', 'required-low'],
       suggested: ['suggested-high', 'suggested-mid', 'suggested-low'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
     });
   });
 

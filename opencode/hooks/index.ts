@@ -1,5 +1,4 @@
-import { createHash } from 'crypto';
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { access, readFile, unlink } from 'fs/promises';
 import { extname, join } from 'path';
 import { analyzeIntent } from './lib/intent-analyzer.js';
@@ -44,13 +43,11 @@ interface SessionIdentity {
   conversation_id?: string;
 }
 
-interface HookEvent {
-  type: string;
-  properties?: {
-    info?: SessionIdentity;
-    sessionID?: string;
-  };
-}
+type SessionCreatedEvent = { type: 'session.created'; properties: { info: SessionIdentity } };
+type SessionCompactedEvent = { type: 'session.compacted'; properties: { sessionID: string } };
+type SessionDeletedEvent = { type: 'session.deleted'; properties: { info: SessionIdentity } };
+type UnknownEvent = { type: string; properties?: Record<string, unknown> };
+type HookEvent = SessionCreatedEvent | SessionCompactedEvent | SessionDeletedEvent | UnknownEvent;
 
 interface ChatPart {
   type?: string;
@@ -90,6 +87,7 @@ interface CommandDiscoveryCache {
   rules: Record<string, CommandRule>;
 }
 
+const MAX_TRACKED_SESSIONS = 1000;
 const sessionRuntimeState = new Map<string, SessionRuntimeState>();
 
 function extractSessionId(source: SessionIdentity | undefined): string | null {
@@ -250,9 +248,8 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
     try {
       if (configPath) {
         if (existsSync(configPath)) {
-          const configContent = readFileSync(configPath, 'utf-8');
-          const configHash = createHash('md5').update(configContent).digest('hex').slice(0, 12);
-          parts.push(`config:${configPath}:${configHash}`);
+          const stats = statSync(configPath);
+          parts.push(`config:${configPath}:${stats.mtimeMs}:${stats.size}`);
         } else {
           parts.push(`config:${configPath}:missing`);
         }
@@ -269,17 +266,17 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
           continue;
         }
 
+        const dirStats = statSync(commandsDir);
         const entries = readdirSync(commandsDir)
           .filter((entry) => extname(entry).toLowerCase() === '.md')
           .sort();
-        parts.push(`dir:${commandsDir}:count=${entries.length}`);
+        parts.push(`dir:${commandsDir}:${dirStats.mtimeMs}:count=${entries.length}`);
 
         for (const entry of entries) {
           const fullPath = join(commandsDir, entry);
           try {
-            const fileContent = readFileSync(fullPath, 'utf-8');
-            const fileHash = createHash('md5').update(fileContent).digest('hex').slice(0, 12);
-            parts.push(`file:${commandsDir}\\${entry}:${fileHash}`);
+            const fileStats = statSync(fullPath);
+            parts.push(`file:${commandsDir}\\${entry}:${fileStats.mtimeMs}:${fileStats.size}`);
           } catch {
             parts.push(`file:${commandsDir}\\${entry}:unreadable`);
           }
@@ -302,7 +299,11 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
       const rules = discoverCommands(commandDiscoveryOptions);
       commandRulesCache = { signature, rules };
       return rules;
-    } catch {
+    } catch (error) {
+      debugLog(`command-discovery: discovery failed: ${String(error)}`);
+      if (commandRulesCache.signature === '') {
+        debugLog('command-discovery: FIRST CALL FAILED — returning empty rules');
+      }
       return commandRulesCache.rules;
     }
   }
@@ -322,18 +323,27 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
       try {
         switch (event.type) {
           case 'session.created': {
-            const sessionID = extractSessionId(event.properties?.info);
+            const e = event as SessionCreatedEvent;
+            const sessionID = extractSessionId(e.properties.info);
             if (!sessionID) {
               return;
             }
 
+            if (sessionRuntimeState.size >= MAX_TRACKED_SESSIONS) {
+              const oldestKey = sessionRuntimeState.keys().next().value;
+              if (oldestKey !== undefined) {
+                sessionRuntimeState.delete(oldestKey);
+                debugLog(`session-map: evicted oldest session=${oldestKey} (limit=${MAX_TRACKED_SESSIONS})`);
+              }
+            }
             sessionRuntimeState.set(sessionID, { injected: false });
             writeSessionState(stateDirectory, sessionID, [], [], [], []);
             return;
           }
 
           case 'session.deleted': {
-            const sessionID = extractSessionId(event.properties?.info);
+            const e = event as SessionDeletedEvent;
+            const sessionID = extractSessionId(e.properties.info);
             if (!sessionID) {
               return;
             }
@@ -344,7 +354,8 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
           }
 
           case 'session.compacted': {
-            const sessionID = event.properties?.sessionID;
+            const e = event as SessionCompactedEvent;
+            const sessionID = e.properties.sessionID;
             if (!sessionID) {
               return;
             }
@@ -411,10 +422,10 @@ export default async function plugin(input: PluginInputLike): Promise<HooksLike>
         const suggestedSkills = analysis.suggested.filter((skillName) =>
           availableSkillNames.has(skillName)
         );
-        const requiredCommands = (analysis.requiredCommands || []).filter((commandName) =>
+        const requiredCommands = analysis.requiredCommands.filter((commandName) =>
           availableCommandNames.has(commandName)
         );
-        const suggestedCommands = (analysis.suggestedCommands || []).filter((commandName) =>
+        const suggestedCommands = analysis.suggestedCommands.filter((commandName) =>
           availableCommandNames.has(commandName)
         );
         const commandFiltration = filterCommandReferences(

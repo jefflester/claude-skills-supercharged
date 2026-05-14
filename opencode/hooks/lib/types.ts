@@ -10,8 +10,19 @@
  */
 export interface SkillConfidence {
   name: string;
+  /** Value in range [0.0, 1.0]. Clamped at parse time in ai-client.ts. */
   confidence: number;
   reason: string;
+}
+
+/**
+ * Compact skill score used for full diagnostic rankings.
+ */
+export interface SkillRanking {
+  name: string;
+  /** Value in range [0.0, 1.0]. Clamped at parse time in ai-client.ts. */
+  confidence: number;
+  reason?: string;
 }
 
 /**
@@ -19,6 +30,7 @@ export interface SkillConfidence {
  */
 export interface CommandConfidence {
   name: string;
+  /** Value in range [0.0, 1.0]. Clamped at parse time in ai-client.ts. */
   confidence: number;
   reason: string;
 }
@@ -29,6 +41,7 @@ export interface CommandConfidence {
 export interface IntentAnalysis {
   primary_intent: string;
   skills: SkillConfidence[];
+  skill_rankings?: SkillRanking[];
   commands?: CommandConfidence[];
 }
 
@@ -39,10 +52,11 @@ export interface AnalysisResult {
   required: string[];
   suggested: string[];
   fromCache?: boolean;
+  fromFallback?: boolean;
   scores?: Record<string, number>; // skill name -> confidence score (debug mode)
-  requiredCommands?: string[];
-  suggestedCommands?: string[];
-  commandScores?: Record<string, number>;
+  requiredCommands: string[];
+  suggestedCommands: string[];
+  commandScores: Record<string, number>;
 }
 
 /**
@@ -109,8 +123,8 @@ export interface CacheEntry {
   result: {
     required: string[];
     suggested: string[];
-    requiredCommands?: string[];
-    suggestedCommands?: string[];
-    commandScores?: Record<string, number>;
+    requiredCommands: string[];
+    suggestedCommands: string[];
+    commandScores: Record<string, number>;
   };
 }

@@ -6,8 +6,18 @@
  */
 
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
+
+function validateDirectoryPath(dirPath: string): string {
+  if (dirPath.includes('\0')) {
+    throw new Error(`Directory path contains null bytes: ${dirPath}`);
+  }
+  if (/\.\.[\\/]/.test(dirPath) || dirPath.endsWith('..')) {
+    throw new Error(`Directory path contains traversal sequences: ${dirPath}`);
+  }
+  return resolve(dirPath);
+}
 
 // ── Skills Directory Resolution ───────────────────────────────────────────────
 // OPENCODE_SKILLS_DIR: Root directory containing SKILL.md files and skill-rules.json
@@ -52,7 +62,7 @@ function getGlobalSkillsCandidates(): string[] {
 
 function resolveSkillsDirectory(projectDirectory: string): string {
   if (process.env.OPENCODE_SKILLS_DIR) {
-    return process.env.OPENCODE_SKILLS_DIR;
+    return validateDirectoryPath(process.env.OPENCODE_SKILLS_DIR);
   }
 
   for (const candidate of getGlobalSkillsCandidates()) {
@@ -70,28 +80,29 @@ export const SKILLS_DIR = resolveSkillsDirectory(
 
 // OPENCODE_SKILL_RULES_PATH: Explicit path to skill-rules.json
 // If unset, defaults to <SKILLS_DIR>/skill-rules.json
-export const SKILL_RULES_PATH =
-  process.env.OPENCODE_SKILL_RULES_PATH || join(SKILLS_DIR, 'skill-rules.json');
+export const SKILL_RULES_PATH = process.env.OPENCODE_SKILL_RULES_PATH
+  ? validateDirectoryPath(process.env.OPENCODE_SKILL_RULES_PATH)
+  : join(SKILLS_DIR, 'skill-rules.json');
 
 // OPENCODE_SKILLS_STATE_DIR: Directory for session state files
 // Defaults to <project>/.claude/hooks/state if it exists, otherwise <plugin-dir>/state
-export const SKILLS_STATE_DIR =
-  process.env.OPENCODE_SKILLS_STATE_DIR ||
-  (() => {
-    const legacy = join(
-      process.env.OPENCODE_PROJECT_DIR || process.cwd(),
-      '.claude',
-      'hooks',
-      'state'
-    );
-    return existsSync(legacy) ? legacy : join(process.cwd(), 'state');
-  })();
+export const SKILLS_STATE_DIR = process.env.OPENCODE_SKILLS_STATE_DIR
+  ? validateDirectoryPath(process.env.OPENCODE_SKILLS_STATE_DIR)
+  : (() => {
+      const legacy = join(
+        process.env.OPENCODE_PROJECT_DIR || process.cwd(),
+        '.claude',
+        'hooks',
+        'state'
+      );
+      return existsSync(legacy) ? legacy : join(process.cwd(), 'state');
+    })();
 
 // OPENCODE_SKILLS_CACHE_DIR: Directory for intent-analysis cache
 // Defaults to <project>/.opencode/cache/intent-analysis
-export const SKILLS_CACHE_DIR =
-  process.env.OPENCODE_SKILLS_CACHE_DIR ||
-  join(process.env.OPENCODE_PROJECT_DIR || process.cwd(), '.opencode', 'cache', 'intent-analysis');
+export const SKILLS_CACHE_DIR = process.env.OPENCODE_SKILLS_CACHE_DIR
+  ? validateDirectoryPath(process.env.OPENCODE_SKILLS_CACHE_DIR)
+  : join(process.env.OPENCODE_PROJECT_DIR || process.cwd(), '.opencode', 'cache', 'intent-analysis');
 
 // OPENCODE_SKILLS_PROMPT_TEMPLATE: Optional custom prompt template for intent analysis
 export const SKILLS_PROMPT_TEMPLATE = process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE || '';
@@ -101,10 +112,12 @@ export const SKILLS_PROMPT_TEMPLATE = process.env.OPENCODE_SKILLS_PROMPT_TEMPLAT
 //   suggest  — keyword fallback returns domain skills as suggested
 //   inject   — keyword fallback returns domain skills as required (critical)
 // Default: suggest (conservative but useful)
-export const FALLBACK_DOMAIN_MODE = (process.env.OPENCODE_SKILLS_FALLBACK_DOMAIN_MODE || 'suggest') as
-  | 'off'
-  | 'suggest'
-  | 'inject';
+function parseFallbackDomainMode(value: string | undefined): 'off' | 'suggest' | 'inject' {
+  if (value === 'off' || value === 'inject') return value;
+  return 'suggest';
+}
+
+export const FALLBACK_DOMAIN_MODE = parseFallbackDomainMode(process.env.OPENCODE_SKILLS_FALLBACK_DOMAIN_MODE);
 
 // Confidence thresholds for AI-powered skill detection
 // Higher threshold (0.65) ensures only truly critical skills are auto-injected
@@ -151,6 +164,21 @@ export const CACHE_CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 // Dependency resolution defaults
 // Skills without explicit injectionOrder use this value (mid-range 0-100)
 export const DEFAULT_INJECTION_ORDER = 50;
+
+// AI provider call timeout
+// How long (ms) to wait for a response before aborting. Propagates to the
+// existing catch-block fallback in intent-analyzer.ts.
+// Override: OPENCODE_SKILLS_AI_TIMEOUT
+export const AI_TIMEOUT_MS = Number(process.env.OPENCODE_SKILLS_AI_TIMEOUT) || 30000;
+
+// Minimum interval (ms) between AI intent-analysis calls to prevent runaway usage.
+// Override: OPENCODE_SKILLS_MIN_AI_INTERVAL
+export const MIN_AI_CALL_INTERVAL_MS = (() => {
+  const raw = process.env.OPENCODE_SKILLS_MIN_AI_INTERVAL;
+  if (raw === undefined || raw === '') return 2000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+})();
 
 // Debug mode toggle
 // Controlled by OPENCODE_SKILLS_DEBUG=1 environment variable

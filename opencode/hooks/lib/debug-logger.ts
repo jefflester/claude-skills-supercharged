@@ -8,6 +8,9 @@
 import { appendFileSync, existsSync, mkdirSync, statSync, renameSync } from 'fs';
 import { join } from 'path';
 
+// WARNING: Debug log may contain user behavioral data (intent analysis results, session IDs).
+// Treat .opencode/hooks/skill-injection-debug.log as sensitive.
+
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
 
 function isDebugEnabled(): boolean {
@@ -48,6 +51,6 @@ export function debugLog(message: string): void {
     appendFileSync(logPath, `[${timestamp}] ${message}\n`);
   } catch (err) {
     // Silently fail - logging must never break the hook
-    console.error('⚠️ Debug logging failed:', err);
+    console.error('⚠️ Debug logging failed:', err); // eslint-disable-line no-console
   }
 }

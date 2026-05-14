@@ -5,6 +5,7 @@
  * detects circular dependencies, and sorts by injection order.
  */
 
+import { debugLog } from './debug-logger.js';
 import type { SkillRule } from './types.js';
 
 /**
@@ -67,8 +68,7 @@ export function resolveSkillDependencies(
 
   // Report all errors together
   if (errors.length > 0) {
-    console.error('⚠️ Skill dependency resolution errors:');
-    errors.forEach((err) => console.error(`  - ${err}`));
+    debugLog(`skill-resolution: dependency errors: ${errors.join(', ')}`);
   }
 
   // Sort by injection order

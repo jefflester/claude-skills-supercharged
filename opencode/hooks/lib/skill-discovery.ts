@@ -8,13 +8,14 @@
 
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
-  statSync,
 } from 'fs';
-import { join } from 'path';
+import { join, resolve, sep } from 'path';
 import type { SkillRule, SkillRulesConfig } from './types.js';
 import { SKILL_RULES_PATH, SKILLS_DIR } from './constants.js';
+import { debugLog } from './debug-logger.js';
 
 /**
  * Parse YAML frontmatter from SKILL.md content
@@ -161,11 +162,17 @@ export function discoverSkillsFromDirectory(skillsDir: string): Record<string, S
     const skillPath = join(skillsDir, entry);
 
     try {
-      const stat = statSync(skillPath);
+      const stat = lstatSync(skillPath);
+      if (stat.isSymbolicLink()) continue;
       if (!stat.isDirectory()) continue;
     } catch {
       continue;
     }
+
+    // Path traversal guard: ensure the resolved path stays within skillsDir
+    const resolvedPath = resolve(skillPath);
+    const resolvedBase = resolve(skillsDir);
+    if (!resolvedPath.startsWith(resolvedBase + sep) && resolvedPath !== resolvedBase) continue;
 
     const skillFile = join(skillPath, 'SKILL.md');
     if (!existsSync(skillFile)) {
@@ -175,8 +182,8 @@ export function discoverSkillsFromDirectory(skillsDir: string): Record<string, S
     try {
       const content = readFileSync(skillFile, 'utf-8');
       skills[entry] = buildSkillRuleFromFile(entry, content);
-    } catch {
-      // Skip unreadable skills
+    } catch (error) {
+      debugLog(`skill-discovery: failed to read ${skillFile}: ${String(error)}`);
     }
   }
 

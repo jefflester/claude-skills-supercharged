@@ -26,15 +26,20 @@ import type { AnalysisResult, CommandRule, SkillRule } from './types.js';
 // Re-export types for backward compatibility
 export type { SkillConfidence, IntentAnalysis, AnalysisResult } from './types.js';
 
-const COMMON_TRIGGER_STOPWORDS = new Set([
+// Schema version for persistent cache. Bump when cache entry shape changes. v9: migrated hashing from MD5 to SHA-256.
+const CACHE_SCHEMA_VERSION = 'full-surface-v9';
+const DEFAULT_PLUGIN_VERSION = '1.0.0';
+const FALLBACK_METADATA_STOPWORDS = new Set([
   'about',
   'actual',
-  'daily',
+  'and',
+  'for',
   'help',
   'need',
   'needs',
+  'the',
+  'this',
   'today',
-  'user',
   'using',
   'want',
   'wants',
@@ -43,10 +48,8 @@ const COMMON_TRIGGER_STOPWORDS = new Set([
   'where',
   'which',
   'workflow',
+  'with',
 ]);
-
-const CACHE_SCHEMA_VERSION = 'candidate-v6';
-const DEFAULT_PLUGIN_VERSION = '1.0.0';
 
 function normalizeToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -60,113 +63,68 @@ function getPromptTokens(prompt: string): string[] {
     .filter((token) => token.length >= 3);
 }
 
-function tokenMatches(promptTokens: string[], keyword: string): boolean {
-  const normalizedKeyword = normalizeToken(keyword);
-  if (normalizedKeyword.length < 3 || COMMON_TRIGGER_STOPWORDS.has(normalizedKeyword)) {
+function tokenMatches(promptTokens: string[], value: string): boolean {
+  const normalizedValue = normalizeToken(value);
+  if (normalizedValue.length < 3 || FALLBACK_METADATA_STOPWORDS.has(normalizedValue)) {
     return false;
   }
 
   return promptTokens.some(
     (token) =>
-      token === normalizedKeyword ||
-      (token.length >= 4 && normalizedKeyword.startsWith(token)) ||
-      (normalizedKeyword.length >= 4 && token.startsWith(normalizedKeyword))
+      token === normalizedValue ||
+      (token.length >= 4 && normalizedValue.startsWith(token)) ||
+      (normalizedValue.length >= 4 && token.startsWith(normalizedValue))
   );
 }
 
-function scoreCandidateSkill(
-  prompt: string,
+function scoreCommandFallback(
+  promptLower: string,
   promptTokens: string[],
-  skillName: string,
-  skillRule: SkillRule
+  commandName: string,
+  commandRule: CommandRule
 ): number {
-  const promptLower = prompt.toLowerCase();
-  const skillNameLower = skillName.toLowerCase();
-  const frameworkTokens = [
-    'android',
-    'django',
-    'fastapi',
-    'flutter',
-    'java',
-    'kotlin',
-    'laravel',
-    'nestjs',
-    'nextjs',
-    'nuxt',
-    'perl',
-    'springboot',
-    'swift',
-  ];
-
-  const frameworkToken = frameworkTokens.find((token) => skillNameLower.includes(token));
-  if (frameworkToken && !promptLower.includes(frameworkToken)) {
-    return 0;
-  }
-
+  const commandNameLower = commandName.toLowerCase();
   let score = 0;
 
-  if (promptLower.includes(skillNameLower)) {
+  if (promptLower.includes(commandNameLower)) {
     score += 8;
   }
 
-  for (const token of skillNameLower.split(/[-_\s]+/g)) {
+  for (const token of commandNameLower.split(/[-_\s.]+/g)) {
     if (tokenMatches(promptTokens, token)) {
       score += 4;
     }
   }
 
-  const keywords = skillRule.promptTriggers?.keywords || [];
-  for (const keyword of keywords) {
-    if (tokenMatches(promptTokens, keyword)) {
-      score += 1;
-    }
-  }
+  const keywordScore = (commandRule.promptTriggers?.keywords || []).reduce((total, keyword) => {
+    return total + (tokenMatches(promptTokens, keyword) ? 2 : 0);
+  }, 0);
+  score += keywordScore;
 
-  const descriptionTokens = Array.from(
+  const metadataTokens = Array.from(
     new Set(
-      (skillRule.description || '')
+      [
+        commandRule.description || '',
+        commandRule.summary || '',
+        commandRule.workflowPhase || '',
+      ]
+        .join(' ')
         .toLowerCase()
         .split(/[^a-z0-9]+/g)
         .map((token) => token.replace(/s$/, ''))
-        .filter((token) => token.length >= 4 && !COMMON_TRIGGER_STOPWORDS.has(token))
+        .filter((token) => token.length >= 4 && !FALLBACK_METADATA_STOPWORDS.has(token))
     )
-  ).slice(0, 24);
-  let descriptionScore = 0;
-  for (const token of descriptionTokens) {
+  ).slice(0, 48);
+
+  let metadataScore = 0;
+  for (const token of metadataTokens) {
     if (tokenMatches(promptTokens, token)) {
-      descriptionScore += 1;
+      metadataScore += 1;
     }
   }
-  score += Math.min(descriptionScore, 6);
-
-  if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt) && /security|auth/.test(skillNameLower)) {
-    score += 5;
-  }
-
-  if (/\btest|tests|testing|pytest|unit\b/i.test(prompt) && /test|tdd|regression/.test(skillNameLower)) {
-    score += 5;
-  }
+  score += Math.min(metadataScore, 8);
 
   return score;
-}
-
-function selectCandidateSkills(
-  prompt: string,
-  availableSkills: Record<string, SkillRule>,
-  maxCandidates = 32
-): Record<string, SkillRule> {
-  const promptTokens = getPromptTokens(prompt);
-  const scored = Object.entries(availableSkills)
-    .map(([skillName, skillRule]) => ({
-      skillName,
-      skillRule,
-      score: scoreCandidateSkill(prompt, promptTokens, skillName, skillRule),
-    }))
-    .filter((candidate) => candidate.score > 0)
-    .sort((a, b) => b.score - a.score || a.skillName.localeCompare(b.skillName))
-    .slice(0, maxCandidates);
-
-  return Object.fromEntries(scored.map(({ skillName, skillRule }) => [skillName, skillRule]));
 }
 
 function commandRuleAsSkillRule(commandRule: CommandRule): SkillRule {
@@ -184,32 +142,6 @@ function commandRuleAsSkillRule(commandRule: CommandRule): SkillRule {
     injectionOrder: commandRule.injectionOrder,
     promptTriggers: commandRule.promptTriggers,
   };
-}
-
-function selectCandidateCommands(
-  prompt: string,
-  availableCommands: Record<string, CommandRule>,
-  maxCandidates = 32
-): Record<string, CommandRule> {
-  const promptTokens = getPromptTokens(prompt);
-  const scored = Object.entries(availableCommands)
-    .map(([commandName, commandRule]) => ({
-      commandName,
-      commandRule,
-      score: scoreCandidateSkill(
-        prompt,
-        promptTokens,
-        commandName,
-        commandRuleAsSkillRule(commandRule)
-      ),
-    }))
-    .filter((candidate) => candidate.score > 0)
-    .sort((a, b) => b.score - a.score || a.commandName.localeCompare(b.commandName))
-    .slice(0, maxCandidates);
-
-  return Object.fromEntries(
-    scored.map(({ commandName, commandRule }) => [commandName, commandRule])
-  );
 }
 
 function buildCommandMetadataFingerprint(commands: Record<string, CommandRule>): string {
@@ -247,20 +179,21 @@ function buildCommandFallback(
   const matched = matchSkillsByKeywords(prompt, commandRules);
   const requiredCommands = new Set(matched.required);
   const suggestedCommands = new Set(matched.suggested);
+  const commandScores: Record<string, number> = {};
+  const promptLower = prompt.toLowerCase();
+  const promptTokens = getPromptTokens(prompt);
 
-  const scoredCandidates =
-    FALLBACK_DOMAIN_MODE === 'off'
-      ? selectCandidateCommands(
-          prompt,
-          Object.fromEntries(
-            Object.entries(availableCommands).filter(
-              ([, commandRule]) => commandRule.autoInject === true
-            )
-          )
-        )
-      : selectCandidateCommands(prompt, availableCommands);
-  for (const [commandName, commandRule] of Object.entries(scoredCandidates)) {
-    if (requiredCommands.has(commandName)) continue;
+  for (const [commandName, commandRule] of Object.entries(availableCommands)) {
+    if (requiredCommands.has(commandName) || suggestedCommands.has(commandName)) {
+      continue;
+    }
+
+    const score = scoreCommandFallback(promptLower, promptTokens, commandName, commandRule);
+    if (score <= 0) {
+      continue;
+    }
+
+    commandScores[commandName] = score;
 
     if (commandRule.autoInject === true) {
       requiredCommands.add(commandName);
@@ -274,9 +207,10 @@ function buildCommandFallback(
         suggestedCommands.delete(commandName);
         break;
       case 'suggest':
+        suggestedCommands.add(commandName);
+        break;
       case 'off':
       default:
-        suggestedCommands.add(commandName);
         break;
     }
   }
@@ -286,7 +220,7 @@ function buildCommandFallback(
     suggestedCommands: Array.from(
       new Set(Array.from(suggestedCommands).filter((commandName) => !requiredCommands.has(commandName)))
     ),
-    commandScores: {},
+    commandScores,
   };
 }
 
@@ -318,30 +252,29 @@ export async function analyzeIntent(
     return {
       ...skillFallback,
       ...buildCommandFallback(prompt, availableCommands),
+      fromFallback: true,
     };
   }
 
-  const candidateSkills = selectCandidateSkills(prompt, availableSkills);
-  const candidateSkillNames = new Set(Object.keys(candidateSkills));
-  const candidateCommands = selectCandidateCommands(prompt, availableCommands);
-  const candidateCommandNames = new Set(Object.keys(candidateCommands));
+  const availableSkillNames = new Set(Object.keys(availableSkills));
+  const availableCommandNames = new Set(Object.keys(availableCommands));
 
-  if (candidateSkillNames.size === 0 && candidateCommandNames.size === 0) {
-    return { required: [], suggested: [] };
+  if (availableSkillNames.size === 0 && availableCommandNames.size === 0) {
+    return { required: [], suggested: [], requiredCommands: [], suggestedCommands: [], commandScores: {} };
   }
 
   // Check opt-in persistent cache first. Include the model/scoring dimensions
   // that can change required/suggested categorization across sessions.
-  const skillsHash = createHash('md5')
-    .update(JSON.stringify(candidateSkills))
+  const skillsHash = createHash('sha256')
+    .update(JSON.stringify(availableSkills))
     .digest('hex')
     .substring(0, 8);
-  const commandsHash = createHash('md5')
-    .update(buildCommandMetadataFingerprint(candidateCommands))
+  const commandsHash = createHash('sha256')
+    .update(buildCommandMetadataFingerprint(availableCommands))
     .digest('hex')
     .substring(0, 8);
   const provider = getProvider();
-  const promptTemplateHash = createHash('md5')
+  const promptTemplateHash = createHash('sha256')
     .update(process.env.OPENCODE_SKILLS_PROMPT_TEMPLATE || '')
     .digest('hex')
     .substring(0, 8);
@@ -359,7 +292,7 @@ export async function analyzeIntent(
     skillsHash,
     commandsHash,
   };
-  const cacheKey = createHash('md5')
+  const cacheKey = createHash('sha256')
     .update(`${prompt}:${JSON.stringify(cacheDimensions)}`)
     .digest('hex');
 
@@ -373,89 +306,76 @@ export async function analyzeIntent(
 
   // Call AI provider
   try {
-    const analysis = await callAIForIntentAnalysis(prompt, candidateSkills, candidateCommands);
+    const analysis = await callAIForIntentAnalysis(prompt, availableSkills, availableCommands);
 
     // Debug logging
     if (DEBUG_ENABLED) {
       formatDebugOutput(analysis);
     }
 
-    // Categorize by confidence thresholds
+    // Categorize by confidence thresholds (immutable filter — no mutation)
     const categorized = categorizeSkills(analysis);
     const categorizedCommands = categorizeCommands(analysis);
-    categorized.required = categorized.required.filter((skillName) => candidateSkillNames.has(skillName));
-    categorized.suggested = categorized.suggested.filter((skillName) => candidateSkillNames.has(skillName));
-    categorizedCommands.required = categorizedCommands.required.filter((commandName) =>
-      candidateCommandNames.has(commandName)
+
+    const filteredRequired = categorized.required.filter((name) => availableSkillNames.has(name));
+    const filteredSuggested = categorized.suggested.filter(
+      (name) => availableSkillNames.has(name) && !filteredRequired.includes(name)
     );
-    categorizedCommands.suggested = categorizedCommands.suggested.filter((commandName) =>
-      candidateCommandNames.has(commandName)
+    const filteredRequiredCommands = categorizedCommands.required.filter((name) =>
+      availableCommandNames.has(name)
+    );
+    const filteredSuggestedCommands = categorizedCommands.suggested.filter(
+      (name) => availableCommandNames.has(name) && !filteredRequiredCommands.includes(name)
     );
 
-    if (/\bapi\b|\bendpoint\b/i.test(prompt) && candidateSkillNames.has('api-design')) {
-      categorized.required.push('api-design');
-    }
+    const uniqueRequired = Array.from(new Set(filteredRequired));
+    const uniqueSuggested = Array.from(
+      new Set(filteredSuggested.filter((name) => !uniqueRequired.includes(name)))
+    );
+    const uniqueRequiredCommands = Array.from(new Set(filteredRequiredCommands));
+    const uniqueSuggestedCommands = Array.from(
+      new Set(filteredSuggestedCommands.filter((name) => !uniqueRequiredCommands.includes(name)))
+    );
 
-    if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt) && candidateSkillNames.has('security-review')) {
-      categorized.required.push('security-review');
-    }
-
-    if (/\bapi\b|\bendpoint\b/i.test(prompt) && candidateCommandNames.has('api-design')) {
-      categorizedCommands.required.push('api-design');
-    }
-
-    if (/\bsecure|security|auth|authentication|authorization\b/i.test(prompt)) {
-      if (candidateCommandNames.has('security')) {
-        categorizedCommands.required.push('security');
+    // Build command scores from AI analysis
+    const commandScores: Record<string, number> = {};
+    for (const command of analysis.commands || []) {
+      if (availableCommandNames.has(command.name)) {
+        commandScores[command.name] = command.confidence;
       }
-      if (candidateCommandNames.has('security-review')) {
-        categorizedCommands.required.push('security-review');
-      }
     }
 
-    categorized.required = Array.from(new Set(categorized.required));
-    categorized.suggested = Array.from(
-      new Set(categorized.suggested.filter((skillName) => !categorized.required.includes(skillName)))
-    );
-    categorizedCommands.required = Array.from(new Set(categorizedCommands.required));
-    categorizedCommands.suggested = Array.from(
-      new Set(
-        categorizedCommands.suggested.filter(
-          (commandName) => !categorizedCommands.required.includes(commandName)
-        )
-      )
-    );
-
-    // Build result with optional debug scores
-    const result = buildAnalysisResult(
-      categorized,
+    // Build base result immutably
+    const baseResult = buildAnalysisResult(
+      {
+        required: uniqueRequired,
+        suggested: uniqueSuggested,
+        requiredCommands: uniqueRequiredCommands,
+        suggestedCommands: uniqueSuggestedCommands,
+        commandScores,
+      },
       analysis,
       DEBUG_ENABLED
     );
-    result.requiredCommands = Array.from(new Set(categorizedCommands.required));
-    result.suggestedCommands = Array.from(
-      new Set(
-        categorizedCommands.suggested.filter(
-          (commandName) => !result.requiredCommands!.includes(commandName)
-        )
-      )
-    );
-    result.commandScores = {};
-    for (const command of analysis.commands || []) {
-      if (candidateCommandNames.has(command.name)) {
-        result.commandScores[command.name] = command.confidence;
-      }
-    }
 
     // Guarantee guardrail skills are included even on long prompts where AI
     // might under-score them. Keyword matcher only returns guardrail skills
     // (autoInject !== false), so this union is safe.
     const keywordHits = matchSkillsByKeywords(prompt, availableSkills);
+    const guaranteedRequired = [...baseResult.required];
     for (const skill of keywordHits.required) {
-      if (!result.required.includes(skill) && !result.suggested.includes(skill)) {
-        result.required.push(skill);
+      if (!guaranteedRequired.includes(skill) && !baseResult.suggested.includes(skill)) {
+        guaranteedRequired.push(skill);
       }
     }
+
+    const result: AnalysisResult = {
+      ...baseResult,
+      required: guaranteedRequired,
+      requiredCommands: uniqueRequiredCommands,
+      suggestedCommands: uniqueSuggestedCommands,
+      commandScores,
+    };
 
     if (persistentCacheEnabled) {
       writeCache(cacheKey, {
@@ -473,11 +393,11 @@ export async function analyzeIntent(
         error instanceof Error ? error.message : String(error)
       }`
     );
-    console.warn('Intent analysis failed, falling back to keyword matching:', error);
     const skillFallback = matchSkillsByKeywords(prompt, availableSkills);
     return {
       ...skillFallback,
       ...buildCommandFallback(prompt, availableCommands),
+      fromFallback: true,
     };
   }
 }

@@ -142,6 +142,9 @@ describe('intent-scorer', () => {
     expect(categorizeSkills(analysis)).toEqual({
       required: ['required-high'],
       suggested: ['suggested-mid'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
     });
   });
 
@@ -167,6 +170,9 @@ describe('intent-scorer', () => {
     expect(categorizeSkills(analysis)).toEqual({
       required: ['required-third', 'required-high', 'required-fourth', 'required-fifth', 'required-sixth'],
       suggested: ['suggested-high', 'suggested-third', 'suggested-fourth', 'suggested-fifth', 'suggested-sixth'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
     });
   });
 
@@ -174,11 +180,20 @@ describe('intent-scorer', () => {
     expect(categorizeSkills({ primary_intent: 'x', skills: undefined as never })).toEqual({
       required: [],
       suggested: [],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
     });
   });
 
   it('builds analysis results with optional score maps', () => {
-    const categorized: AnalysisResult = { required: ['required-high'], suggested: ['suggested-mid'] };
+    const categorized: AnalysisResult = {
+      required: ['required-high'],
+      suggested: ['suggested-mid'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
+    };
     const analysis: IntentAnalysis = {
       primary_intent: 'build',
       skills: [
@@ -191,9 +206,42 @@ describe('intent-scorer', () => {
     expect(buildAnalysisResult(categorized, analysis, true)).toEqual({
       required: ['required-high'],
       suggested: ['suggested-mid'],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
       scores: {
         'required-high': 0.9,
         'suggested-mid': 0.6,
+      },
+    });
+  });
+
+  it('uses full skill rankings for debug score maps when provided', () => {
+    const categorized: AnalysisResult = {
+      required: ['required-high'],
+      suggested: [],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
+    };
+    const analysis: IntentAnalysis = {
+      primary_intent: 'build',
+      skills: [{ name: 'required-high', confidence: 0.9, reason: 'high' }],
+      skill_rankings: [
+        { name: 'required-high', confidence: 0.9 },
+        { name: 'low-but-ranked', confidence: 0.12 },
+      ],
+    };
+
+    expect(buildAnalysisResult(categorized, analysis, true)).toEqual({
+      required: ['required-high'],
+      suggested: [],
+      requiredCommands: [],
+      suggestedCommands: [],
+      commandScores: {},
+      scores: {
+        'required-high': 0.9,
+        'low-but-ranked': 0.12,
       },
     });
   });
@@ -208,11 +256,10 @@ describe('skill-resolution', () => {
     ]);
   });
 
-  it('logs missing and circular dependency errors without throwing', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
+  it('handles missing and circular dependency errors without throwing', () => {
+    // Errors are now routed through debugLog (not console.error) — verify the
+    // function still returns the partial result and does not throw.
     expect(resolveSkillDependencies(['missing', 'cycle-a'], mockSkillRules)).toEqual(['cycle-a', 'cycle-b']);
-    expect(errorSpy).toHaveBeenCalled();
   });
 });
 

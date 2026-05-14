@@ -11,17 +11,51 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import {
+  AI_TIMEOUT_MS,
   COMMAND_CONFIDENCE_THRESHOLD,
   COMMAND_SUGGESTED_THRESHOLD,
   CONFIDENCE_THRESHOLD,
   MAX_REQUIRED_COMMANDS,
   MAX_REQUIRED_SKILLS,
+  MIN_AI_CALL_INTERVAL_MS,
   SUGGESTED_THRESHOLD,
 } from './constants.js';
 import { debugLog } from './debug-logger.js';
 import type { CommandRule, IntentAnalysis, SkillRule } from './types.js';
 
 export type AIProvider = 'anthropic' | 'openai' | 'ollama';
+
+function validateOllamaUrl(urlString: string, isExplicitlySet: boolean): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    throw new Error(`Invalid OLLAMA_BASE_URL: ${urlString}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Unsupported protocol for Ollama URL: ${parsed.protocol}`);
+  }
+  if (!isExplicitlySet) {
+    return urlString;  // Default localhost is safe
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+  const restrictedPatterns = [
+    /^169\.254\./,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^127\./,
+    /^0\.0\.0\.0$/,
+    /^::1$/,
+    /^localhost$/i,
+  ];
+  for (const pattern of restrictedPatterns) {
+    if (pattern.test(hostname)) {
+      throw new Error(`OLLAMA_BASE_URL points to a restricted address: ${hostname}`);
+    }
+  }
+  return urlString;
+}
 
 interface ApiKeyCredential {
   apiKey: string;
@@ -101,7 +135,8 @@ function readOpenCodeApiKey(provider: 'anthropic' | 'openai'): string | undefine
           return key;
         }
       }
-    } catch {
+    } catch (error) {
+      debugLog(`ai-client: failed to parse auth file ${authPath}: ${String(error)}`);
       continue;
     }
   }
@@ -123,6 +158,7 @@ function getAnthropicApiKey(): ApiKeyCredential | undefined {
   return undefined;
 }
 
+// Project-directory prompt templates are trusted by design — the project owner controls this path.
 export function getPromptTemplate(): string {
   const projectDir = process.env.OPENCODE_PROJECT_DIR || process.cwd();
   const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -162,9 +198,9 @@ function buildSkillDescriptions(skills: Record<string, SkillRule>): string {
 
 function buildCommandDescriptions(commands: Record<string, CommandRule>): string {
   const MAX_DESCRIPTION_CHARS = 180;
-  const MAX_SUMMARY_CHARS = 260;
+  const MAX_SUMMARY_CHARS = 320;
   const MAX_LINE_CHARS = 560;
-  const MAX_TOTAL_CHARS = 12000;
+  const MAX_TOTAL_CHARS = 25000;
 
   const sanitizeText = (text: string): string =>
     text
@@ -180,6 +216,7 @@ function buildCommandDescriptions(commands: Record<string, CommandRule>): string
 
   const lines: string[] = [];
   let totalChars = 0;
+  let truncatedCount = 0;
 
   for (const [commandName, commandRule] of Object.entries(commands)) {
       const description = truncate(
@@ -199,11 +236,29 @@ function buildCommandDescriptions(commands: Record<string, CommandRule>): string
       );
 
       if (totalChars + line.length > MAX_TOTAL_CHARS) {
+        truncatedCount = Object.keys(commands).length - lines.length;
         break;
       }
 
       lines.push(line);
       totalChars += line.length + 1;
+  }
+
+  if (truncatedCount > 0) {
+    const truncationNoticePrefix = '- NOTE: Command references truncated due to prompt budget.';
+    let notice = `${truncationNoticePrefix} Omitted ${truncatedCount} command reference(s).`;
+    while (lines.length > 0 && totalChars + notice.length + 1 > MAX_TOTAL_CHARS) {
+      const removedLine = lines.pop();
+      if (!removedLine) break;
+      totalChars -= removedLine.length + 1;
+      truncatedCount += 1;
+      notice = `${truncationNoticePrefix} Omitted ${truncatedCount} command reference(s).`;
+    }
+
+    lines.push(notice);
+    debugLog(
+      `intent-ai-client: truncated command descriptions for prompt budget included=${lines.length} omitted=${truncatedCount} maxTotalChars=${MAX_TOTAL_CHARS}`
+    );
   }
 
   return lines.join('\n');
@@ -213,15 +268,56 @@ function formatThreshold(value: number): string {
   return value.toFixed(2);
 }
 
+const MAX_USER_PROMPT_LENGTH = 50000;
+
+/**
+ * Returns the raw user prompt for use as the user-message content.
+ * Validates length to prevent oversized inputs.
+ *
+ * @throws {Error} if the prompt exceeds MAX_USER_PROMPT_LENGTH characters
+ */
+export function getUserPromptContent(prompt: string): string {
+  if (prompt.length > MAX_USER_PROMPT_LENGTH) {
+    throw new Error(
+      `User prompt exceeds maximum length of ${MAX_USER_PROMPT_LENGTH.toLocaleString()} characters`
+    );
+  }
+  return prompt;
+}
+
+/**
+ * Builds the system/instruction portion of the intent analysis prompt.
+ * User content is NOT embedded here — it is sent as a separate user message
+ * to prevent prompt injection attacks.
+ *
+ * For backward compatibility the function still accepts an optional leading
+ * `prompt` string as the first argument, but that value is ignored.
+ */
 export function buildPrompt(
-  prompt: string,
-  skills: Record<string, SkillRule>,
-  commands: Record<string, CommandRule> = {}
+  _promptOrSkills: string | Record<string, SkillRule>,
+  skillsOrCommands?: Record<string, SkillRule> | Record<string, CommandRule>,
+  commandsArg: Record<string, CommandRule> = {}
 ): string {
+  // Resolve overloaded arguments:
+  //   Legacy:  buildPrompt(userPrompt, skills, commands)
+  //   Current: buildPrompt(skills, commands)
+  let skills: Record<string, SkillRule>;
+  let commands: Record<string, CommandRule>;
+
+  if (typeof _promptOrSkills === 'string') {
+    // Legacy three-argument call — first arg was the user prompt (now ignored)
+    skills = (skillsOrCommands ?? {}) as Record<string, SkillRule>;
+    commands = commandsArg;
+  } else {
+    // Two-argument call — first arg is skills
+    skills = _promptOrSkills;
+    commands = (skillsOrCommands ?? {}) as Record<string, CommandRule>;
+  }
+
   const promptTemplate = getPromptTemplate();
   const commandDescriptions = buildCommandDescriptions(commands);
   const renderedPrompt = promptTemplate
-    .replace(/\{\{USER_PROMPT\}\}/g, () => prompt)
+    .replace(/\{\{USER_PROMPT\}\}/g, '')
     .replace(/\{\{SKILL_DESCRIPTIONS\}\}/g, () => buildSkillDescriptions(skills))
     .replace(/\{\{COMMAND_DESCRIPTIONS\}\}/g, () => commandDescriptions)
     .replace(/\{\{SKILL_REQUIRED_THRESHOLD\}\}/g, () => formatThreshold(CONFIDENCE_THRESHOLD))
@@ -288,6 +384,7 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
     const candidateAnalysis = parsedValue as {
       primary_intent: unknown;
       skills: unknown;
+      skill_rankings?: unknown;
       commands?: unknown;
     };
 
@@ -320,10 +417,42 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
 
       return {
         name: candidateSkill.name.replace(/\s*\((?:domain|guardrail)\)\s*$/i, '').trim(),
-        confidence: candidateSkill.confidence,
+        confidence: Math.max(0, Math.min(1, candidateSkill.confidence)),
         reason: candidateSkill.reason,
       };
     });
+
+    let skillRankings: { name: string; confidence: number; reason?: string }[] | undefined;
+    if (candidateAnalysis.skill_rankings !== undefined) {
+      if (!Array.isArray(candidateAnalysis.skill_rankings)) {
+        throw new Error('skill_rankings must be an array when provided.');
+      }
+
+      skillRankings = candidateAnalysis.skill_rankings.map((rankingEntry) => {
+        if (typeof rankingEntry !== 'object' || rankingEntry === null) {
+          throw new Error('Each skill ranking entry must be an object.');
+        }
+
+        const candidateRanking = rankingEntry as {
+          name: unknown;
+          confidence: unknown;
+          reason?: unknown;
+        };
+
+        if (
+          typeof candidateRanking.name !== 'string' ||
+          typeof candidateRanking.confidence !== 'number'
+        ) {
+          throw new Error('Each skill ranking entry must include name and confidence fields.');
+        }
+
+        return {
+          name: candidateRanking.name.replace(/\s*\((?:domain|guardrail)\)\s*$/i, '').trim(),
+          confidence: Math.max(0, Math.min(1, candidateRanking.confidence)),
+          ...(typeof candidateRanking.reason === 'string' ? { reason: candidateRanking.reason } : {}),
+        };
+      });
+    }
 
     let commands: { name: string; confidence: number; reason: string }[] = [];
     if (candidateAnalysis.commands !== undefined) {
@@ -352,7 +481,7 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
 
         return {
           name: candidateCommand.name.trim(),
-          confidence: candidateCommand.confidence,
+          confidence: Math.max(0, Math.min(1, candidateCommand.confidence)),
           reason: candidateCommand.reason,
         };
       });
@@ -361,6 +490,7 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
     return {
       primary_intent: candidateAnalysis.primary_intent,
       skills,
+      ...(skillRankings ? { skill_rankings: skillRankings } : {}),
       commands,
     };
   } catch (error) {
@@ -369,7 +499,10 @@ export function parseIntentAnalysis(content: string): IntentAnalysis {
   }
 }
 
-async function callAnthropicIntentAnalysis(prompt: string): Promise<IntentAnalysis> {
+async function callAnthropicIntentAnalysis(
+  systemPrompt: string,
+  userPrompt: string
+): Promise<IntentAnalysis> {
   const credential = getAnthropicApiKey();
 
   if (!credential) {
@@ -389,16 +522,17 @@ async function callAnthropicIntentAnalysis(prompt: string): Promise<IntentAnalys
   }
 
   const AnthropicClient = anthropicModule.default;
-  const client = new AnthropicClient({ apiKey: credential.apiKey });
+  const client = new AnthropicClient({ apiKey: credential.apiKey, timeout: AI_TIMEOUT_MS });
   const model = getModel('anthropic');
   debugLog(`intent analysis provider=anthropic model=${model} authSource=${credential.source}`);
 
   try {
     const response = await client.messages.create({
       model,
-      max_tokens: 1024,
+      max_tokens: 10000,
       temperature: 0.1,
-      messages: [{ role: 'user', content: prompt }],
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
     });
 
     const responseText = response.content
@@ -417,7 +551,10 @@ async function callAnthropicIntentAnalysis(prompt: string): Promise<IntentAnalys
   }
 }
 
-async function callOpenAIIntentAnalysis(prompt: string): Promise<IntentAnalysis> {
+async function callOpenAIIntentAnalysis(
+  systemPrompt: string,
+  userPrompt: string
+): Promise<IntentAnalysis> {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -444,8 +581,11 @@ async function callOpenAIIntentAnalysis(prompt: string): Promise<IntentAnalysis>
     const response = await client.chat.completions.create({
       model,
       temperature: 0,
-      messages: [{ role: 'user', content: prompt }],
-    });
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    }, { signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
 
     const messageContent = response.choices[0]?.message?.content;
     const responseText = Array.isArray(messageContent)
@@ -473,12 +613,17 @@ interface OllamaGenerateResponse {
   error?: string;
 }
 
-async function callOllamaIntentAnalysis(prompt: string): Promise<IntentAnalysis> {
+async function callOllamaIntentAnalysis(
+  systemPrompt: string,
+  userPrompt: string
+): Promise<IntentAnalysis> {
   if (typeof fetch !== 'function') {
     throw new Error('Global fetch is not available. Use Node.js 18+ or provide a fetch polyfill.');
   }
 
-  const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '');
+  const rawUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+  const isExplicitlySet = Boolean(process.env.OLLAMA_BASE_URL);
+  const baseUrl = validateOllamaUrl(rawUrl.replace(/\/+$/, ''), isExplicitlySet);
   const model = getModel('ollama');
 
   try {
@@ -489,9 +634,11 @@ async function callOllamaIntentAnalysis(prompt: string): Promise<IntentAnalysis>
       },
       body: JSON.stringify({
         model,
-        prompt,
+        system: systemPrompt,
+        prompt: userPrompt,
         stream: false,
       }),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -513,21 +660,35 @@ async function callOllamaIntentAnalysis(prompt: string): Promise<IntentAnalysis>
   }
 }
 
+let lastAICallTimestamp = 0;
+
+/** Reset the rate-limiter timestamp (for testing only). */
+export function _resetRateLimiter(): void {
+  lastAICallTimestamp = 0;
+}
+
 export async function callAIForIntentAnalysis(
   prompt: string,
   skills: Record<string, SkillRule>,
   commands: Record<string, CommandRule> = {}
 ): Promise<IntentAnalysis> {
+  if (Date.now() - lastAICallTimestamp < MIN_AI_CALL_INTERVAL_MS) {
+    debugLog('ai-client: rate limited, skipping AI call');
+    return { primary_intent: '', skills: [], commands: [] };
+  }
+  lastAICallTimestamp = Date.now();
+
   const provider = getProvider();
-  const analysisPrompt = buildPrompt(prompt, skills, commands);
+  const systemPrompt = buildPrompt(skills, commands);
+  const userPrompt = getUserPromptContent(prompt);
 
   if (provider === 'openai') {
-    return callOpenAIIntentAnalysis(analysisPrompt);
+    return callOpenAIIntentAnalysis(systemPrompt, userPrompt);
   }
 
   if (provider === 'ollama') {
-    return callOllamaIntentAnalysis(analysisPrompt);
+    return callOllamaIntentAnalysis(systemPrompt, userPrompt);
   }
 
-  return callAnthropicIntentAnalysis(analysisPrompt);
+  return callAnthropicIntentAnalysis(systemPrompt, userPrompt);
 }

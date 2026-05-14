@@ -10,6 +10,23 @@ import { join } from 'path';
 import { SKILLS_DIR } from './constants.js';
 import type { CommandRule } from './types.js';
 
+// Emoji banners are intentional — they help visually separate injected sections in Claude's context.
+
+const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+
+function validateSkillName(name: string): boolean {
+  if (name.includes('..') || name.includes('/') || name.includes('\\') || name.includes(':') || name.includes('\0')) {
+    return false;
+  }
+  if (name.length === 0 || name.length > 255) {
+    return false;
+  }
+  if (WINDOWS_RESERVED_NAMES.test(name)) {
+    return false;
+  }
+  return true;
+}
+
 function sanitizeCommandName(commandName: string): string {
   return commandName
     .replace(/[\r\n\t]/g, ' ')
@@ -28,7 +45,7 @@ function formatCommandReference(
 ): string {
   const safeCommandName = sanitizeCommandName(commandName);
   const sourcePath = commandRules[commandName]?.sourcePath;
-  if (!sourcePath) {
+  if (!sourcePath || sourcePath.includes('..')) {
     return `/${safeCommandName}`;
   }
 
@@ -36,6 +53,9 @@ function formatCommandReference(
 }
 
 function formatSkillReference(skillName: string, skillsDir = SKILLS_DIR): string {
+  if (!validateSkillName(skillName)) {
+    return `$${skillName}`;
+  }
   const skillPath = join(skillsDir, skillName, 'SKILL.md');
   return `[$${skillName}](${formatMarkdownLinkTarget(skillPath)})`;
 }

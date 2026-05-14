@@ -16,12 +16,12 @@ import {
   statSync,
 } from 'fs';
 import { join } from 'path';
-import { CACHE_TTL_MS, CACHE_CLEANUP_AGE_MS, DEBUG_ENABLED } from './constants.js';
+import { CACHE_TTL_MS, CACHE_CLEANUP_AGE_MS, SKILLS_CACHE_DIR } from './constants.js';
 import type { AnalysisResult, CacheEntry } from './types.js';
 import { debugLog } from './debug-logger.js';
 
-// Use project root for cache directory, not hooks cwd
-const CACHE_DIR = join(process.cwd(), '.opencode', 'cache', 'intent-analysis');
+// Use the centralized constant which respects OPENCODE_PROJECT_DIR
+const CACHE_DIR = SKILLS_CACHE_DIR;
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 let lastCacheCleanupAt = 0;
 
@@ -90,20 +90,24 @@ export function writeCache(
     return;
   }
 
-  // Ensure cache directory exists
-  if (!existsSync(CACHE_DIR)) {
-    mkdirSync(CACHE_DIR, { recursive: true });
+  try {
+    // Ensure cache directory exists
+    if (!existsSync(CACHE_DIR)) {
+      mkdirSync(CACHE_DIR, { recursive: true });
+    }
+
+    maybeCleanupOldCacheEntries();
+
+    const cachePath = join(CACHE_DIR, `${key}.json`);
+    const entry: CacheEntry = {
+      timestamp: Date.now(),
+      result,
+    };
+
+    writeFileSync(cachePath, JSON.stringify(entry));
+  } catch (error) {
+    debugLog(`cache-manager: writeCache failed: ${String(error)}`);
   }
-
-  maybeCleanupOldCacheEntries();
-
-  const cachePath = join(CACHE_DIR, `${key}.json`);
-  const entry: CacheEntry = {
-    timestamp: Date.now(),
-    result,
-  };
-
-  writeFileSync(cachePath, JSON.stringify(entry));
 }
 
 /**
@@ -130,7 +134,7 @@ function cleanupOldCacheEntries(now: number): void {
 
     const files = readdirSync(CACHE_DIR);
 
-    files.forEach((file) => {
+    for (const file of files) {
       const filePath = join(CACHE_DIR, file);
       try {
         const stats = statSync(filePath);
@@ -140,16 +144,10 @@ function cleanupOldCacheEntries(now: number): void {
           unlinkSync(filePath);
         }
       } catch (err) {
-        // Log in debug mode for troubleshooting
-        if (DEBUG_ENABLED) {
-          console.warn(`Cache cleanup: failed to process ${file}:`, err);
-        }
+        debugLog(`cache-manager: cleanup failed to process ${file}: ${String(err)}`);
       }
-    });
-  } catch (err) {
-    // Log directory-level errors in debug mode
-    if (DEBUG_ENABLED) {
-      console.warn('Cache cleanup failed:', err);
     }
+  } catch (err) {
+    debugLog(`cache-manager: cleanup failed: ${String(err)}`);
   }
 }

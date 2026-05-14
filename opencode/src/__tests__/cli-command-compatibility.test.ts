@@ -1,15 +1,44 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../cli.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../cli.js')>();
   return actual;
 });
 
+const mocks = vi.hoisted(() => ({
+  callAIForIntentAnalysis: vi.fn(),
+  getProvider: vi.fn(),
+  getModel: vi.fn(),
+}));
+
+vi.mock('../../hooks/lib/ai-client.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import('../../hooks/lib/ai-client.js');
+  return {
+    ...actual,
+    callAIForIntentAnalysis: mocks.callAIForIntentAnalysis,
+    getProvider: mocks.getProvider,
+    getModel: mocks.getModel,
+  };
+});
+
 import { main, selectSkills } from '../cli.js';
 
 describe('CLI command compatibility', () => {
+  const compatibilityPrompt = 'Use the PRP workflow to plan this feature and validate quality gates';
+
+  beforeEach(() => {
+    mocks.callAIForIntentAnalysis.mockReset();
+    mocks.getProvider.mockReturnValue('anthropic');
+    mocks.getModel.mockReturnValue('claude-haiku-4-5');
+    mocks.callAIForIntentAnalysis.mockResolvedValue({
+      primary_intent: 'quality workflow',
+      skills: [{ name: 'tdd-workflow', confidence: 0.9, reason: 'testing' }],
+      commands: [{ name: 'code-review', confidence: 0.78, reason: 'review checks' }],
+    });
+  });
+
   it('selectSkills returns command fields without removing existing fields', async () => {
-    const result = await selectSkills('Use the PRP workflow to plan this feature', {
+    const result = await selectSkills(compatibilityPrompt, {
       debug: false,
       format: 'json',
     });
@@ -31,7 +60,7 @@ describe('CLI command compatibility', () => {
     const exitCode = await main([
       '--format',
       'json',
-      'Use the PRP workflow to plan this feature',
+      compatibilityPrompt,
     ]);
 
     expect(exitCode).toBe(0);
@@ -46,13 +75,13 @@ describe('CLI command compatibility', () => {
   });
 
   it('filters and persists command acknowledgments across repeated session calls', async () => {
-    const sessionId = 'cli-repeat-session';
-    const first = await selectSkills('Use the PRP workflow to plan this feature', {
+    const sessionId = `cli-repeat-session-${Date.now()}`;
+    const first = await selectSkills(compatibilityPrompt, {
       debug: false,
       format: 'json',
       sessionId,
     });
-    const second = await selectSkills('Use the PRP workflow to plan this feature', {
+    const second = await selectSkills(compatibilityPrompt, {
       debug: false,
       format: 'json',
       sessionId,
@@ -64,7 +93,7 @@ describe('CLI command compatibility', () => {
 
   it('main text output includes command sections when command recommendations are present', async () => {
     const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const exitCode = await main(['Use the PRP workflow to plan this feature']);
+    const exitCode = await main([compatibilityPrompt]);
 
     expect(exitCode).toBe(0);
     const payload = String(writeSpy.mock.calls[0][0]);

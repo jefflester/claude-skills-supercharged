@@ -165,7 +165,7 @@ describe('command-aware intent analyzer', () => {
     expect(result.suggestedCommands).not.toContain('template-only');
   });
 
-  it('uses command prompt triggers for AI candidate selection like skills', async () => {
+  it('passes the full command map to AI intent analysis', async () => {
     mocks.callAIForIntentAnalysis.mockResolvedValue({
       primary_intent: 'security implementation',
       skills: [],
@@ -194,15 +194,15 @@ describe('command-aware intent analyzer', () => {
       }
     );
 
-    expect(mocks.callAIForIntentAnalysis).toHaveBeenCalledWith(
-      expect.any(String),
-      {},
-      {
-        security: expect.objectContaining({
-          description: 'Run comprehensive security review',
-        }),
-      }
-    );
+    const aiCall = mocks.callAIForIntentAnalysis.mock.calls[0];
+    const passedCommands = aiCall?.[2] as Record<string, CommandRule>;
+    expect(Object.keys(passedCommands).sort()).toEqual(['docs', 'security']);
+    expect(passedCommands.security).toMatchObject({
+      description: 'Run comprehensive security review',
+    });
+    expect(passedCommands.docs).toMatchObject({
+      description: 'Write product documentation',
+    });
     expect(result.requiredCommands).toEqual(['security']);
   });
 
@@ -279,7 +279,7 @@ describe('command-aware intent analyzer', () => {
     expect(firstCacheKey).not.toEqual(secondCacheKey);
   });
 
-  it('selects a command candidate based on summary relevance even when name/triggers do not match', async () => {
+  it('calls AI with full skill and command maps even without local keyword overlap', async () => {
     mocks.callAIForIntentAnalysis.mockResolvedValue({
       primary_intent: 'security analysis',
       skills: [],
@@ -287,8 +287,14 @@ describe('command-aware intent analyzer', () => {
     });
 
     await analyzeIntent(
-      'Create a dependency security report and verify vulnerability risks',
-      {},
+      'Coordinate quarterly roadmap staffing and release planning milestones across product teams',
+      {
+        'tdd-workflow': {
+          type: 'domain',
+          description: 'Testing workflow',
+          promptTriggers: { keywords: ['test', 'testing'] },
+        },
+      },
       {
         'audit-helper': {
           description: 'Helper command',
@@ -308,16 +314,21 @@ describe('command-aware intent analyzer', () => {
 
     expect(mocks.callAIForIntentAnalysis).toHaveBeenCalledWith(
       expect.any(String),
-      {},
+      expect.objectContaining({
+        'tdd-workflow': expect.any(Object),
+      }),
       {
         'audit-helper': expect.objectContaining({
           summary: 'Generate dependency security report with vulnerability findings.',
+        }),
+        unrelated: expect.objectContaining({
+          description: 'Generic helper command',
         }),
       }
     );
   });
 
-  it('forces security command only by exact name, not by unrelated summary mentions', async () => {
+  it('does not inject commands from regex shortcuts when AI returns no commands', async () => {
     mocks.callAIForIntentAnalysis.mockResolvedValue({
       primary_intent: 'security implementation',
       skills: [],
@@ -352,12 +363,15 @@ describe('command-aware intent analyzer', () => {
       }
     );
 
-    expect(result.requiredCommands).toContain('security');
+    // With no AI-sourced commands, all command lists are empty.
+    // Regex shortcuts have been removed — command routing is AI-only.
+    expect(result.requiredCommands).toEqual([]);
+    expect(result.suggestedCommands).toEqual([]);
     expect(result.requiredCommands).not.toContain('python-review');
     expect(result.requiredCommands).not.toContain('add-language-rules');
   });
 
-  it('suggests summary-relevant commands in short-prompt fallback even without prompt triggers', async () => {
+  it('uses full command metadata fallback for short prompts', async () => {
     const result = await analyzeIntent(
       'security dependency report',
       {},
@@ -423,5 +437,42 @@ describe('command-aware intent analyzer', () => {
       }
       vi.resetModules();
     }
+  });
+
+  it('returns empty result without calling AI when both full surfaces are empty', async () => {
+    const result = await analyzeIntent(
+      'This is a long prompt that should bypass short fallback but has no available surfaces to analyze',
+      {},
+      {}
+    );
+
+    expect(result).toEqual({ required: [], suggested: [], requiredCommands: [], suggestedCommands: [], commandScores: {} });
+    expect(mocks.callAIForIntentAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('filters unknown skill and command names returned by the model against full availability maps', async () => {
+    mocks.callAIForIntentAnalysis.mockResolvedValue({
+      primary_intent: 'quality review',
+      skills: [
+        { name: 'tdd-workflow', confidence: 0.8, reason: 'tests' },
+        { name: 'unknown-skill', confidence: 0.99, reason: 'hallucinated' },
+      ],
+      commands: [
+        { name: 'quality-gate', confidence: 0.92, reason: 'quality gate' },
+        { name: 'unknown-command', confidence: 0.99, reason: 'hallucinated' },
+      ],
+    });
+
+    const result = await analyzeIntent(
+      'Please run testing and the quality gate workflow across the changed files in this branch',
+      skills,
+      commands
+    );
+
+    expect(result.required).toContain('tdd-workflow');
+    expect(result.required).not.toContain('unknown-skill');
+    expect(result.requiredCommands).toContain('quality-gate');
+    expect(result.requiredCommands).not.toContain('unknown-command');
+    expect(result.commandScores).not.toHaveProperty('unknown-command');
   });
 });
